@@ -38,6 +38,8 @@ export interface Expectations {
   "tools.notCalled"?: string[];
   /** 工具调用总次数上限：用来抓"路径冗余"（本来两步能做完，走了五步） */
   "tools.maxCalls"?: number;
+  /** 工具报错次数：用来验证"错误回灌之后模型有没有改策略" */
+  "tools.errors"?: number;
   /** 回答里必须出现的片段 */
   textContains?: string[];
   /** 回答里不允许出现的片段（用来抓泄漏） */

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-03T15:42:05.823Z",
+  "generatedAt": "2026-11-10T07:12:27.685Z",
   "passRate": 1,
   "cases": {
     "boundary-cross-person": true,
@@ -7,6 +7,8 @@
     "guard-repeat-call": true,
     "happy-reminder": true,
     "memory-temp-instruction": true,
-    "resilience-device-fail": true
+    "resilience-device-fail": true,
+    "rule-ask-single-option": true,
+    "rule-reject-then-correct": true
   }
 }

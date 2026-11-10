@@ -1,0 +1,42 @@
+{
+  "id": "rule-reject-then-correct",
+  "title": "参数规则：时间不带时区被拒，模型改对后成功",
+  "tags": ["guard", "resilience"],
+  "goal": "明天上午提醒我给张三打个电话。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒给张三打电话",
+          "payload": { "at": "2026-11-11T09:00:00" },
+          "reason": "ev_001 里张三说等他电话",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒给张三打电话",
+          "payload": { "at": "2026-11-11T09:00:00+08:00" },
+          "reason": "ev_001 里张三说等他电话",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    { "text": "提醒已经排好，等你确认。" }
+  ],
+  "expect": {
+    "cards.total": 1,
+    "cards.executed": 1,
+    "tools.errors": 1,
+    "guard.blocked": 1,
+    "tools.called": ["propose_action"],
+    "tools.maxCalls": 3
+  }
+}

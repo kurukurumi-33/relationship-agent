@@ -7,6 +7,7 @@ import { seedState } from "../src/data/seed.js";
 import { MockDevice } from "../src/runtime/device.js";
 import { Outbox } from "../src/runtime/outbox.js";
 import { RunGuard, DEFAULT_BUDGET } from "../src/agent/guard.js";
+import { checkToolRules } from "../src/agent/rules.js";
 import { repairToolPairing, makeContextPruner, injectSurveyResults } from "../src/session/resume.js";
 import { buildMemorySnapshot } from "../src/agent/snapshot.js";
 import { ingestEvidence } from "../src/ingest/evidence.js";
@@ -299,7 +300,7 @@ async function main(): Promise<void> {
         fauxToolCall("propose_action", {
           kind: "reminder",
           title: "会失败的提醒",
-          payload: {},
+          payload: { at: "2026-11-20T09:00:00+08:00" },
           reason: "测试接管",
           sourceIds: ["ev_001"],
         }),
@@ -772,6 +773,109 @@ async function main(): Promise<void> {
   );
 
   await unknownStore.close();
+
+  console.log("\n[17] 参数规则：拦下来的原因要能让模型改对");
+  const baseAction = {
+    kind: "reminder",
+    title: "提醒张三复查",
+    payload: { at: "2026-11-20T09:00:00+08:00" },
+    reason: "ev_001 提到复查",
+    sourceIds: ["ev_001"],
+  };
+  const violated = (tool: string, args: unknown) => checkToolRules(tool, args)?.rule;
+
+  check("空标题被拦", violated("propose_action", { ...baseAction, title: "   " }) === "title-empty");
+  check(
+    "超长标题被拦",
+    violated("propose_action", { ...baseAction, title: "长".repeat(81) }) === "title-too-long",
+  );
+  check(
+    "reminder 缺 at 被拦",
+    violated("propose_action", { ...baseAction, payload: {} }) === "missing-at",
+  );
+  check(
+    "at 不带时区被拦",
+    violated("propose_action", { ...baseAction, payload: { at: "2026-11-20T09:00:00" } }) === "bad-at",
+  );
+  check("at 带偏移放行", violated("propose_action", baseAction) === undefined);
+  check(
+    "at 用 Z 放行",
+    violated("propose_action", { ...baseAction, payload: { at: "2026-11-20T01:00:00Z" } }) ===
+      undefined,
+  );
+  check(
+    "草稿消息空正文被拦",
+    violated("propose_action", {
+      kind: "draft_message",
+      title: "给张三发消息",
+      payload: { text: "  " },
+      reason: "x",
+      sourceIds: ["ev_001"],
+    }) === "missing-text",
+  );
+  check(
+    "只有一个选项的追问被拦",
+    violated("ask_user", { questions: [{ id: "time", question: "几点", options: ["七点"] }] }) ===
+      "question-options",
+  );
+  check(
+    "追问 id 重复被拦",
+    violated("ask_user", {
+      questions: [
+        { id: "time", question: "几点", options: ["七点", "八点"] },
+        { id: "time", question: "哪天", options: ["周一", "周二"] },
+      ],
+    }) === "question-id-dup",
+  );
+  check("没有规则的工具直接放行", violated("review_candidates", { anything: 1 }) === undefined);
+
+  // 端到端：第一次参数不合格被拦，模型拿到 isError 之后改对参数重试
+  const rulesState = join(root, "data", "smoke-rules.db");
+  await Store.reset(rulesState);
+  const rulesStore = await Store.open(rulesState);
+  await rulesStore.seedIfEmpty(seedState);
+
+  const rulesReg = registerFauxProvider({});
+  rulesReg.setResponses([
+    fauxAssistantMessage(
+      [
+        fauxToolCall("propose_action", {
+          ...baseAction,
+          payload: { at: "2026-11-20T09:00:00" },
+        }),
+      ],
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage([fauxToolCall("propose_action", baseAction)], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("时间补上时区了。")]),
+  ]);
+
+  const rulesRun = await runSession({
+    store: rulesStore,
+    personId: "p_001",
+    goal: "提醒张三复查",
+    model: rulesReg.getModel(),
+    survey: async () => ({}),
+    confirm: async () => true,
+    review: async () => true,
+    outbox: new Outbox(rulesStore, new MockDevice(join(root, "data", "smoke-rules-ledger.jsonl"))),
+  });
+  rulesReg.unregister();
+
+  const rulesSession = await rulesStore.getSession(rulesRun.sessionId);
+  const ruleMessages = (rulesSession?.messages ?? []) as Array<{ role: string; isError?: boolean }>;
+  const errorResults = ruleMessages.filter((m) => m.role === "toolResult" && m.isError);
+  check("被规则拦下时模型收到 isError 回执", errorResults.length === 1, errorResults.length);
+  check(
+    "回执里说清楚了怎么改（提到时区）",
+    JSON.stringify(errorResults[0] ?? {}).includes("时区"),
+  );
+  check(
+    "模型改对参数后提案落地",
+    (await rulesStore.listActions("p_001")).filter((c) => c.title === baseAction.title).length === 1,
+  );
+  check("规则拦截计入护栏预算", rulesRun.stats.blockedCalls === 1, rulesRun.stats.blockedCalls);
+  await rulesStore.close();
 
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;

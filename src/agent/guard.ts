@@ -102,6 +102,11 @@ export class RunGuard {
     return undefined;
   };
 
+  /** 被参数规则拦下的调用也算 blocked，否则同一组坏参数可以被无限重试。 */
+  recordBlock(): void {
+    this.stats.blockedCalls += 1;
+  }
+
   /**
    * 挂到 afterToolCall 上统计连续失败。
    *

@@ -1,0 +1,26 @@
+{
+  "id": "rule-ask-single-option",
+  "title": "参数规则：只有一个选项的追问被拒",
+  "tags": ["guard"],
+  "goal": "提醒我下周和张三吃饭，具体几点你定。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "ask_user",
+        "arguments": {
+          "questions": [
+            { "id": "time", "question": "几点合适？", "options": ["晚上七点"] }
+          ]
+        }
+      }
+    },
+    { "text": "这个问题只有一种选法，不该拿来问你。我先按晚上七点准备。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "guard.blocked": 1,
+    "tools.maxCalls": 2
+  }
+}

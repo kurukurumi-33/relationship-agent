@@ -2,16 +2,18 @@
 
 对应文件：
 
-- `src/agent/tools.ts`（217 行）
-- `src/agent/guard.ts`（138 行）
+- `src/agent/tools.ts`：模型能调什么
+- `src/agent/guard.ts`：调太多次怎么办
+- `src/agent/rules.ts`：调了但参数不对怎么办
 
-这两份代码回答同一个问题：**模型能做什么，和模型做多了怎么办。**
+这三份代码回答同一个问题：**模型能做什么，和模型做多了、做错了怎么办。**
 
-读完之后你应该能回答三个问题：
+读完之后你应该能回答四个问题：
 
 1. 为什么模型拿不到写数据库的能力，却仍然能"写"记忆？
 2. 预算上限为什么分五种，而不是一个总次数？
 3. `beforeToolCall` 返回 `block: true` 之后，模型看到的是什么？
+4. 参数规则为什么不能全写进 JSON Schema 或 `store`？
 
 ---
 
@@ -188,21 +190,30 @@ if (this.stats.exceededReason) {
 
 ---
 
-## 三、两份代码怎么接起来的
+## 三、三份代码怎么接起来的
 
-`run.ts` 第 199-207 行：
+`run.ts` 的 Agent 构造：
 
 ```ts
 agent = new Agent({
   initialState: { ..., tools },
-  beforeToolCall: async (ctx) => guard.beforeToolCall({ toolCall: ctx.toolCall, args: ctx.args }),
+  beforeToolCall: async (ctx) => {
+    const blocked = guard.beforeToolCall({ toolCall: ctx.toolCall, args: ctx.args });
+    if (blocked?.block) return blocked;
+    const violation = checkToolRules(ctx.toolCall.name, ctx.args);
+    if (!violation) return undefined;
+    guard.recordBlock();
+    return { block: true, reason: `${violation.reason}（规则 ${violation.rule}）` };
+  },
   afterToolCall: async (ctx) => guard.afterToolCall({ isError: ctx.isError }),
 });
 ```
 
-工具数组交给 Agent，护栏钩子也交给 Agent。模型看不到护栏，护栏看不到模型，中间只有 pi 的回调约定。
+工具数组交给 Agent，护栏和规则也交给 Agent。模型看不到它们，它们看不到模型，中间只有 pi 的回调约定。
 
-`run.ts` 第 250-257 行：
+顺序是**先预算、后参数**。反过来的话，一条坏参数会先被规则拦下，却不会计入 `toolCalls` 和重复计数，模型可以用同样的参数无限重试，直到撞上轮次上限。
+
+`run.ts` 的订阅回调：
 
 ```ts
 agent.subscribe(async (event) => {
@@ -213,6 +224,26 @@ agent.subscribe(async (event) => {
 ```
 
 所以护栏的数据来源有三个口子：`beforeToolCall`（事前）、`afterToolCall`（事后）、`subscribe`（轮次事件）。
+
+### 3.1 guard 和 rules 的分界
+
+两个文件都在拦，但拦的东西不一样：
+
+- `guard.ts` 管**数量和节奏**。它不看你调了什么、参数对不对，只看"调了多少次、隔多久一次、同样的东西重复了几遍"。它不需要知道业务。
+- `rules.ts` 管**参数语义**。JSON Schema 保证了字段存在、类型正确，管不了"标题全是空格""时间没带时区""追问只有一个选项"。
+
+所以写进 `rules.ts` 的规则要满足两个条件：Schema 表达不了，且 `store` 也不会拒绝。能用 Schema 写的别写进规则，`store` 已经会校验的也别重复一遍，那只是把同一个错误检查三遍。
+
+### 3.2 拦截理由的措辞是有功能的
+
+规则返回的 `reason` 会被 pi 转成 `isError: true` 的 tool_result，原样回到模型上下文里。所以每句话都写成"怎么改"，不写"禁止"：
+
+```
+payload.at 必须是带时区偏移的 ISO 时间，例如 2026-11-20T09:00:00+08:00；
+不带时区设备会按各自本地时间解释（规则 bad-at）
+```
+
+只写"参数非法"的话，模型下一轮大概率用同样的参数再试一次，白烧一轮。这不是风格问题，是错误回灌能不能起作用的前提。smoke 第 17 段最后四项验证的就是这个链路：第一次被拦、模型收到 isError、改对参数、提案落地。
 
 ---
 
@@ -232,6 +263,12 @@ A：它管的是整个会话，不是单次 HTTP 请求。模型慢、工具慢�
 
 **Q：为什么 `blockedCalls` 要单独计数？**
 A：因为它是诊断信号。`toolCalls` 高说明任务复杂，`blockedCalls` 高说明模型在死循环或者提示词有问题。两个数字放一起才能定位问题。混成一个数字，你就只知道"调用多"，不知道是正常的还是异常的。
+
+**Q：参数规则为什么不直接写进 JSON Schema？**
+A：Schema 只能表达"字段在不在、类型对不对"。标题是 81 个字符、时间没带时区、追问只给了一个选项，这些在 Schema 眼里全合法。也不能都推给 `store`，因为 `store` 拒绝的代价是一次数据库往返，而且它报的错是给开发者看的，不是给模型看的。规则的定位就是 Schema 和存储之间的那一层。判断标准很硬：Schema 写不出来的，才写进规则；`store` 已经会拒绝的，也不要重复。
+
+**Q：拦下来之后模型真的会改吗？你怎么证明？**
+A：规则返回的 reason 会作为 isError 的 tool_result 回到上下文，措辞里带具体改法和示例。证据有两处：smoke 第 17 段让模型第一次交不带时区的时间、第二次交带时区的，断言第一次收到 isError、第二次提案落地；评测集里 `rule-reject-then-correct` 是同一个场景的常驻用例，带 `tools.errors: 1` 和 `cards.executed: 1`，改了提示词或换了模型之后这条退步会立刻掉出来。
 
 **Q：工具为什么是串行执行？**
 A：`toolExecution: "sequential"`。行动卡和候选记忆都是写操作，并行只会让日志交错，没有性能收益。要真的并行，得先保证每个工具之间没有隐式依赖（比如 `ask_user` 和 `propose_action` 同时跑，提案可能基于还没答的问题）。串行是保守选择。

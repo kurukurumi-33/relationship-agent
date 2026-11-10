@@ -8,6 +8,7 @@ import { buildMemorySnapshot } from "../agent/snapshot.js";
 import { buildSystemPrompt } from "../agent/prompt.js";
 import { createTools, type SurveyHandler } from "../agent/tools.js";
 import { DEFAULT_BUDGET, RunGuard, type Budget, type GuardStats } from "../agent/guard.js";
+import { checkToolRules } from "../agent/rules.js";
 import type { ConfirmHandler, ReviewHandler } from "../runtime/survey.js";
 import type { Outbox } from "../runtime/outbox.js";
 import { makeContextPruner, repairToolPairing } from "./resume.js";
@@ -209,7 +210,17 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
       tools,
       messages,
     },
-    beforeToolCall: async (ctx) => guard.beforeToolCall({ toolCall: ctx.toolCall, args: ctx.args }),
+    beforeToolCall: async (ctx) => {
+      const blocked = guard.beforeToolCall({ toolCall: ctx.toolCall, args: ctx.args });
+      if (blocked?.block) return blocked;
+
+      // 预算过了再看参数。拦下的原因会作为 isError 的 tool_result 回到模型，
+      // 带上规则名是为了能按规则统计拦截率，不写进给模型看的主句里。
+      const violation = checkToolRules(ctx.toolCall.name, ctx.args);
+      if (!violation) return undefined;
+      guard.recordBlock();
+      return { block: true, reason: `${violation.reason}（规则 ${violation.rule}）` };
+    },
     afterToolCall: async (ctx) => guard.afterToolCall({ isError: ctx.isError }),
     // 压缩：切割点落在 user 消息前，压缩本身也记账（带 generation CAS）
     transformContext: prune
