@@ -1,0 +1,30 @@
+{
+  "id": "happy-reminder",
+  "title": "正常路径：读证据 → 提案 → 确认 → 执行",
+  "tags": ["happy"],
+  "goal": "明天要和张三开会，帮我准备会前提醒。",
+  "personId": "p_001",
+  "script": [
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_001" } } },
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "11 月 1 日晚提醒张三复查时间",
+          "payload": { "at": "2026-11-01T20:00:00+08:00", "channel": "微信" },
+          "reason": "ev_001 里张三说 11/2 上午在医院，提前一晚提醒更稳",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    { "text": "建议 11/1 晚上提醒他。依据是 ev_001。" }
+  ],
+  "expect": {
+    "cards.total": 1,
+    "cards.executed": 1,
+    "handoffs": 0,
+    "tools.called": ["get_evidence_text", "propose_action"],
+    "tools.maxCalls": 3
+  }
+}

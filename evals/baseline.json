@@ -1,0 +1,12 @@
+{
+  "generatedAt": "2026-11-03T15:42:05.823Z",
+  "passRate": 1,
+  "cases": {
+    "boundary-cross-person": true,
+    "boundary-forged-source": true,
+    "guard-repeat-call": true,
+    "happy-reminder": true,
+    "memory-temp-instruction": true,
+    "resilience-device-fail": true
+  }
+}

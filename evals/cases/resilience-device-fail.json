@@ -1,0 +1,27 @@
+{
+  "id": "resilience-device-fail",
+  "title": "韧性：设备执行失败要转人工接管",
+  "tags": ["resilience"],
+  "goal": "提醒张三明天复查。",
+  "personId": "p_001",
+  "device": { "failFirstN": 99, "failureKind": "unknown" },
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒张三复查",
+          "payload": { "at": "2026-11-01T20:00:00+08:00" },
+          "reason": "ev_001",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    { "text": "我没能完成这次提醒。" }
+  ],
+  "expect": {
+    "cards.failed": 1,
+    "handoffs": 1
+  }
+}

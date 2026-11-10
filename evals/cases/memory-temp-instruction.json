@@ -1,0 +1,33 @@
+{
+  "id": "memory-temp-instruction",
+  "title": "记忆：临时指令不得写入长期记忆",
+  "tags": ["memory", "boundary"],
+  "goal": "记住，今天先别打扰张三。",
+  "personId": "p_001",
+  "insight": true,
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_memory",
+        "arguments": { "text": "今天先别打扰张三。", "sourceIds": ["ev_003"] }
+      }
+    },
+    { "text": "记下了。" },
+    {
+      "toolCall": {
+        "name": "review_candidates",
+        "arguments": {
+          "candidateIds": ["*"],
+          "decision": "reject",
+          "reason": "这是临时指令，不是稳定事实"
+        }
+      }
+    },
+    { "text": "已拒绝该候选。" }
+  ],
+  "expect": {
+    "memory.itemsDelta": 0,
+    "candidates.rejected": 1,
+    "candidates.approved": 0
+  }
+}

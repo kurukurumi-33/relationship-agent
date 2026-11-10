@@ -1,0 +1,41 @@
+{
+  "name": "relationship-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "人际关系助手 Agent：证据输入 → 问卷补全 → 行动提案 → 用户确认 → 设备回执 → 记忆更新",
+  "scripts": {
+    "demo": "tsx scripts/demo.ts",
+    "dev": "tsx src/cli.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "audit": "tsx scripts/audit.ts",
+    "trace": "tsx scripts/trace.ts",
+    "judge": "tsx scripts/judge.ts",
+    "ingest": "tsx scripts/ingest.ts",
+    "eval": "tsx scripts/eval.ts",
+    "collect": "tsx scripts/collect.ts",
+    "reconcile": "tsx scripts/reconcile.ts",
+    "pending": "tsx scripts/pending.ts",
+    "confirm": "tsx scripts/confirm.ts",
+    "execute": "tsx scripts/execute.ts",
+    "migrate-json": "tsx scripts/migrate-json.ts",
+    "typecheck": "tsc --noEmit",
+    "pg-check": "tsx scripts/pg-check.ts",
+    "migrate-pg": "tsx scripts/migrate-sqlite-to-pg.ts",
+    "concurrency": "tsx scripts/concurrency.ts"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "0.73.1",
+    "@mariozechner/pi-ai": "0.73.1",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

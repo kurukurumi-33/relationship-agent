@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\relationship-agent\\.archify\\architecture-relationship-agent-20261030-163336\\candidate.json",
+    "sha256": "6bdf4f678654b5bdc52bfbc9460cb2e89bdba57674286ab23e7b7f0684e7983c",
+    "bytes": 5247
+  },
+  "artifact": {
+    "path": "D:\\relationship-agent\\.archify\\architecture-relationship-agent-20261030-163336\\relationship-agent.html",
+    "sha256": "a999e4846c4e8d1ac9b799f0ab79508ab335ac18e833b1891839c791e85df278",
+    "bytes": 828638
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\relationship-agent\\.archify\\architecture-relationship-agent-20261030-163336\\relationship-agent.finalize.json",
+    "summaryReceipt": "D:\\relationship-agent\\.archify\\architecture-relationship-agent-20261030-163336\\relationship-agent.finalize-summary.json",
+    "browserCheckReceipt": "D:\\relationship-agent\\.archify\\architecture-relationship-agent-20261030-163336\\relationship-agent.browser-check.json"
+  },
+  "update": {
+    "status": "update_available",
+    "installedVersion": "3.1.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": "https://github.com/tt-a1i/archify/releases/tag/v3.2.0",
+    "severity": "normal",
+    "checkedAt": "2026-10-30T08:36:17.557Z",
+    "source": "cache",
+    "noticeRequired": true,
+    "noticeText": "Archify update: 3.1.0 → 3.2.0. A previous check at 2026-10-30T08:36:17.557Z found a newer release. Release notes: https://github.com/tt-a1i/archify/releases/tag/v3.2.0. The installed Skill has not changed; ask to snooze or ignore this reminder.",
+    "eventKey": "archify@sha256:70e210265c59f24dcbdf2a502ff671104b5454e7ee7d3554aecd86bad32384f5"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3052,
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "routesOverSuggestedStretch": 1
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [],
+      "detours": [
+        {
+          "relationship": {
+            "id": "tools-to-user",
+            "from": "tools",
+            "to": "user",
+            "label": "追问",
+            "collectionIndex": 10,
+            "artifactIndex": 11
+          },
+          "bends": 2,
+          "stretch": 1.761,
+          "directCorridorBlockers": [
+            {
+              "id": "host",
+              "label": "宿主编排",
+              "box": [
+                220,
+                296,
+                130,
+                72
+              ]
+            },
+            {
+              "id": "agent",
+              "label": "pi Agent",
+              "box": [
+                420,
+                296,
+                130,
+                72
+              ]
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
+  }
+}

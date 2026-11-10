@@ -1,0 +1,17 @@
+node_modules/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/state.json
+data/ledger.jsonl
+# 脚本跑出来的生成物：快照、账本、评测报告
+data/*.json
+data/*.jsonl
+data/*.dbl
+data/eval/
+# 会话回收出来的用例草稿和评测报告都是生成物，只提交人工整理过的 cases
+evals/cases/_inbox/
+evals/report.json
+evals/report.md
+.env
+*.log

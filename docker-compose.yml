@@ -1,0 +1,32 @@
+# 本地开发用的 PostgreSQL。
+# 启动：docker compose up -d
+# 查看：docker compose ps
+# 停止：docker compose down
+# 连库：psql postgresql://relation:relation@localhost:5432/relation
+#
+# 数据放在命名卷 pgdata 里，`docker compose down` 不会删；
+# 要彻底重置用 `docker compose down -v`。
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: relation-pg
+    environment:
+      POSTGRES_USER: relation
+      POSTGRES_PASSWORD: relation
+      POSTGRES_DB: relation
+      # 中文排序/大小写比较用 C 最省事，个人项目够用
+      POSTGRES_INITDB_ARGS: "--locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relation -d relation"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  pgdata:

@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "关系助手 Agent：证据 → 提案 → 回执 → 记忆",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": ".archify/architecture-relationship-agent-20261030-163336/relationship-agent.html"
+  },
+  "components": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "用户",
+      "sublabel": "目标 / 确认 / 审核",
+      "pos": [40, 300],
+      "size": [110, 64]
+    },
+    {
+      "id": "host",
+      "type": "backend",
+      "label": "宿主编排",
+      "sublabel": "装配快照 · 确认 · 落库",
+      "tag": "session/run.ts",
+      "pos": [220, 296],
+      "size": [130, 72]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "pi Agent",
+      "sublabel": "工具循环 + Tool Calling",
+      "tag": "pi-agent-core",
+      "pos": [420, 296],
+      "size": [130, 72]
+    },
+    {
+      "id": "guard",
+      "type": "security",
+      "label": "运行护栏",
+      "sublabel": "轮次 / 次数 / 重复 / 超时",
+      "tag": "agent/guard.ts",
+      "pos": [425, 160],
+      "size": [120, 64]
+    },
+    {
+      "id": "tools",
+      "type": "backend",
+      "label": "工具层",
+      "sublabel": "2 只读 · 1 追问 · 2 提案",
+      "tag": "agent/tools.ts",
+      "pos": [620, 296],
+      "size": [130, 72]
+    },
+    {
+      "id": "proposals",
+      "type": "database",
+      "label": "提案",
+      "sublabel": "ActionCard · 候选记忆",
+      "tag": "proposed / pending",
+      "pos": [820, 296],
+      "size": [140, 72]
+    },
+    {
+      "id": "outbox",
+      "type": "messagebus",
+      "label": "Outbox",
+      "sublabel": "confirmed → submitted",
+      "tag": "requestId 幂等",
+      "pos": [1030, 296],
+      "size": [130, 72]
+    },
+    {
+      "id": "device",
+      "type": "cloud",
+      "label": "设备适配",
+      "sublabel": "日历 / IM / 提醒",
+      "tag": "M1 为 MockDevice",
+      "pos": [1230, 296],
+      "size": [140, 72]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "证据库",
+      "sublabel": "Evidence · 只读",
+      "tag": "data/state.json",
+      "pos": [610, 460],
+      "size": [150, 64]
+    },
+    {
+      "id": "memoryDoc",
+      "type": "database",
+      "label": "长期记忆",
+      "sublabel": "MemoryDoc",
+      "tag": "generation CAS",
+      "pos": [810, 460],
+      "size": [160, 64]
+    },
+    {
+      "id": "receipt",
+      "type": "database",
+      "label": "回执表",
+      "sublabel": "Receipt · 幂等证据",
+      "tag": "requestId 对账",
+      "pos": [1225, 460],
+      "size": [150, 64]
+    }
+  ],
+  "connections": [
+    { "id": "user-to-host", "from": "user", "to": "host", "label": "目标", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "id": "host-to-agent", "from": "host", "to": "agent", "label": "下发", "fromSide": "right", "toSide": "left" },
+    { "id": "agent-to-tools", "from": "agent", "to": "tools", "label": "调用", "fromSide": "right", "toSide": "left" },
+    { "id": "tools-to-proposals", "from": "tools", "to": "proposals", "label": "提案", "fromSide": "right", "toSide": "left" },
+    { "id": "proposals-to-outbox", "from": "proposals", "to": "outbox", "label": "确认", "fromSide": "right", "toSide": "left" },
+    { "id": "outbox-to-device", "from": "outbox", "to": "device", "label": "执行", "variant": "dashed", "fromSide": "right", "toSide": "left" },
+    { "id": "tools-to-store", "from": "tools", "to": "store", "label": "只读", "fromSide": "bottom", "toSide": "top" },
+    { "id": "proposals-to-memory", "from": "proposals", "to": "memoryDoc", "label": "审核", "fromSide": "bottom", "toSide": "top" },
+    { "id": "device-to-receipt", "from": "device", "to": "receipt", "label": "回执", "fromSide": "bottom", "toSide": "top" },
+    { "id": "guard-to-agent", "from": "guard", "to": "agent", "label": "预算", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    {
+      "id": "tools-to-user",
+      "from": "tools",
+      "to": "user",
+      "label": "追问",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [[685, 70], [95, 70]],
+      "labelAt": [390, 58]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "权限边界",
+      "items": [
+        "工具层只有 2 个只读工具、1 个追问、2 个提案工具",
+        "commitMemory / updateAction / recordReceipt 不在工具集里",
+        "工具不接受 personId，会话绑定谁就只能读写谁"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "幂等与恢复",
+      "items": [
+        "requestId + cardVersion 为幂等键，并发点两次确认只执行一次",
+        "先把状态落盘成 submitted，再调用设备",
+        "恢复会话时修复 toolCall/toolResult 配对：缺结果补错误结果，孤儿结果丢弃"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "记忆写入",
+      "items": [
+        "候选记忆必须审核通过才写入，写入带 generation CAS",
+        "sourceIds 必须存在且属于同一联系人",
+        "generation 管并发冲突，version 管对外缓存失效"
+      ]
+    }
+  ]
+}

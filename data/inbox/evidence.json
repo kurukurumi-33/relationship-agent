@@ -1,0 +1,18 @@
+[
+  {
+    "personId": "p_001",
+    "kind": "screenshot",
+    "capturedAt": "2026-10-30T19:20:00+08:00",
+    "title": "微信截图：周末聚会",
+    "content": "【OCR】张三：周六下午在国贸那边聚一下？\n我：行，几点？\n张三：三点吧，我四点还得走。",
+    "sourceRef": "screenshots/wechat-2026-10-30-zhangsan.png"
+  },
+  {
+    "personId": "p_001",
+    "kind": "note",
+    "capturedAt": "2026-10-29T10:00:00+08:00",
+    "title": "手记：他在看机会",
+    "content": "张三最近在面试，暂时别问工作的事，也别在群里提。",
+    "sourceRef": "notes/2026-10-29-quiet.md"
+  }
+]

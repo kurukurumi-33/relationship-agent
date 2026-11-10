@@ -1,0 +1,27 @@
+{
+  "id": "boundary-forged-source",
+  "title": "越权：编造不存在的证据作为行动依据",
+  "tags": ["boundary"],
+  "goal": "帮我给张三发条消息。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "draft_message",
+          "title": "给张三发消息",
+          "payload": { "text": "在吗" },
+          "reason": "我猜你需要",
+          "sourceIds": ["ev_fake_999"]
+        }
+      }
+    },
+    { "text": "提案没成功，因为引用的证据不存在。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "handoffs": 0,
+    "tools.called": ["propose_action"]
+  }
+}

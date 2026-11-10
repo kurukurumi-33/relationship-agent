@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "1b95a627-4dae-442e-b5b2-d82696af0530",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "D:\\relationship-agent\\.archify\\architecture-relationship-agent-20261030-163336\\candidate.json",
+  "output": "D:\\relationship-agent\\.archify\\architecture-relationship-agent-20261030-163336\\relationship-agent.html",
+  "specification": {
+    "sha256": "6bdf4f678654b5bdc52bfbc9460cb2e89bdba57674286ab23e7b7f0684e7983c",
+    "bytes": 5247
+  },
+  "artifact": {
+    "sha256": "a999e4846c4e8d1ac9b799f0ab79508ab335ac18e833b1891839c791e85df278",
+    "bytes": 828638
+  }
+}
