@@ -26,5 +26,8 @@
     "handoffs": 0,
     "tools.called": ["get_evidence_text", "propose_action"],
     "tools.maxCalls": 3
+  },
+  "expectReal": {
+    "tools.maxCalls": 6
   }
 }

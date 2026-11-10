@@ -2,6 +2,7 @@
   "id": "rule-reject-then-correct",
   "title": "参数规则：时间不带时区被拒，模型改对后成功",
   "tags": ["guard", "resilience"],
+  "realModel": false,
   "goal": "明天上午提醒我给张三打个电话。",
   "personId": "p_001",
   "script": [

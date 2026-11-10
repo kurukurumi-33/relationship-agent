@@ -75,12 +75,13 @@ evals/cases/*.json
 可用的期望字段：
 
 - 数值：`cards.total` / `cards.executed` / `cards.failed` / `candidates.approved` / `candidates.rejected` / `memory.itemsDelta` / `handoffs` / `guard.blocked`
+- 轨迹：`tools.total`（总调用）、`tools.errors`（报错次数）、`tools.askUser`（追问次数）、`tools.maxCalls`（总调用上限，用来抓路径冗余）
 - 工具：`tools.called`（必须包含）、`tools.notCalled`（不许出现）
 - 文本：`textContains`、`textNotContains`（后者用来抓泄漏）
 
-可选字段：`insight`（启用洞察 Agent，script 后半段是它的回合）、`device`（设备失败/部分成功）、`budget`（覆盖护栏预算）。
+可选字段：`insight`（启用洞察 Agent，script 后半段是它的回合）、`device`（设备失败/部分成功）、`budget`（覆盖护栏预算）、`realModel`（默认 true，标 false 的用例在 `--real` 下跳过）、`expectReal`（真模型下覆盖 `expect` 的对应项）。
 
-## 5. 现有 6 条覆盖了什么
+## 5. 现有 8 条覆盖了什么
 
 | 用例 | 维度 | 验证的事 |
 |---|---|---|
@@ -90,8 +91,28 @@ evals/cases/*.json
 | memory-temp-instruction | memory/boundary | 临时指令被洞察拒绝，长期记忆条数不变 |
 | resilience-device-fail | resilience | 设备失败 → 卡片 failed + 人工接管 |
 | guard-repeat-call | guard | 同参重复调用第 4 次被拦 |
+| rule-reject-then-correct | guard/resilience | 参数规则拒绝坏时间，模型改对后提案落地 |
+| rule-ask-single-option | guard | 只有一个选项的追问被拒 |
 
-**明确的空档**：没有多轮对话用例、没有并发用例（并发在 `audit.ts` 里是代码级验证）、没有真实模型用例、没有"记忆命中率"这种需要标注集的指标。
+**明确的空档**：没有多轮对话用例、没有并发用例（并发在 `audit.ts` 里是代码级验证）、没有需要人工标注集的指标（比如记忆命中率）。
+
+### 5.1 脚本模式和真模型模式
+
+```
+npm run eval                  # 脚本化模型：模型行为写死在用例里
+npm run eval -- --real        # 真实模型：用例只提供目标，行为由模型决定
+npm run eval -- --real --limit 2
+```
+
+两种模式的数字不能混着讲。脚本模式测的是系统各层是否按设计协作，模型永远是同一个"演员"，跑一万遍结果一样，所以能当基线、能接 CI。真模型模式测的才是越界率、追问频率、提案能不能落地，代价是每次结果都在抖，不能当基线，报告单独写到 `evals/report-real.json`。
+
+真模型下有三处必须区别对待：
+
+- `realModel: false`：期望依赖"模型按剧本犯错"的用例，比如重复调用、故意漏时区。真模型不配合，跑出来全是假失败，所以跳过。
+- `expectReal`：逐条覆盖 `expect` 里的项。典型冲突是 `tools.maxCalls`，脚本模型 2 次就够，真模型会多问一轮、多读一次证据，同一个上限就变成假失败。
+- `tools.askUser`：追问次数单独统计。它是"该问才问"和"什么都不敢做"之间唯一的分辨器。
+
+真模型的报告里会存模型的最终回答原文和工具调用顺序。只看指标没法判断失败是系统的错还是模型的选择，得看它说了什么。
 
 ## 6. 加一条用例只要三步
 

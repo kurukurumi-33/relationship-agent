@@ -13,7 +13,7 @@ import { runSession } from "../session/run.js";
 import { Outbox } from "../runtime/outbox.js";
 import { MockDevice } from "../runtime/device.js";
 import { DEFAULT_BUDGET, type Budget } from "../agent/guard.js";
-import type { CaseResult, EvalCase, ScriptStep } from "./case.js";
+import type { CaseResult, EvalCase, Expectations, ScriptStep } from "./case.js";
 
 interface RunCaseOptions {
   rootDir: string;
@@ -52,13 +52,12 @@ function toolErrorsFrom(messages: unknown[]): number {
 }
 
 function checkExpectations(
-  testCase: EvalCase,
+  expect: Expectations,
   observed: Record<string, number>,
   text: string,
   tools: string[],
 ): string[] {
   const failures: string[] = [];
-  const expect = testCase.expect ?? {};
 
   for (const [key, value] of Object.entries(expect)) {
     // 这个键名本身带点号但语义特殊（上限而不是等值），必须在通用数值分支之前处理
@@ -126,6 +125,7 @@ export async function runCase(testCase: EvalCase, opts: RunCaseOptions): Promise
 
   const budget: Budget = { ...DEFAULT_BUDGET, ...(testCase.budget ?? {}) };
 
+  const usingRealModel = Boolean(opts.model);
   let registration: ReturnType<typeof registerFauxProvider> | undefined;
   let model = opts.model;
   if (!model) {
@@ -139,7 +139,10 @@ export async function runCase(testCase: EvalCase, opts: RunCaseOptions): Promise
     personId,
     goal: testCase.goal,
     model,
-    survey: async () => ({}),
+    // 真模型跑到追问时不能给空答案：拿到空对象它会以为用户没回，然后重复追问。
+    // 取每个问题的第一个选项，让对话继续往下走。
+    survey: async (questions) =>
+      Object.fromEntries(questions.map((q) => [q.id, q.options?.[0] ?? ""])),
     confirm: async () => true,
     review: async () => true,
     outbox,
@@ -166,9 +169,15 @@ export async function runCase(testCase: EvalCase, opts: RunCaseOptions): Promise
     "guard.blocked": result.stats.blockedCalls,
     "tools.total": tools.length,
     "tools.errors": toolErrors,
+    "tools.askUser": tools.filter((t) => t === "ask_user").length,
   };
 
-  const failures = checkExpectations(testCase, observed, result.text, tools);
+  const failures = checkExpectations(
+    usingRealModel ? { ...testCase.expect, ...testCase.expectReal } : (testCase.expect ?? {}),
+    observed,
+    result.text,
+    tools,
+  );
 
   return {
     id: testCase.id,
@@ -177,6 +186,8 @@ export async function runCase(testCase: EvalCase, opts: RunCaseOptions): Promise
     passed: failures.length === 0,
     failures,
     observed,
+    text: result.text,
+    tools,
     tokens: result.usage.totalTokens,
     cost: result.usage.cost,
     toolCalls: tools.length,

@@ -13,5 +13,7 @@ data/eval/
 evals/cases/_inbox/
 evals/report.json
 evals/report.md
+evals/report-real.json
+evals/report-real.md
 .env
 *.log

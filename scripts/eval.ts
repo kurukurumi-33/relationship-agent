@@ -1,17 +1,25 @@
 /**
  * 评测中心（轻量版）。
  *
- *   npm run eval                     # 跑全部用例，和基线比
- *   npm run eval -- --tag boundary   # 只跑某一类
- *   npm run eval -- --update-baseline # 确认改进后更新基线
+ *   npm run eval                       # 脚本化模型，跑全部用例，和基线比
+ *   npm run eval -- --tag boundary     # 只跑某一类
+ *   npm run eval -- --update-baseline  # 确认改进后更新基线
+ *   npm run eval -- --real             # 真实模型，按量计费，不参与基线对比
+ *   npm run eval -- --real --limit 2   # 先花几分钱试两条
  *
  * 和"跑一遍看看"的区别：有数据集、有分维度指标、有基线、有回归判定。
+ *
+ * 两种模式的数字不能混着讲：
+ *   脚本模式测的是"系统各层是否按设计协作"，模型行为是写死的，跑一万遍也一样；
+ *   真模型模式测的才是"模型会不会越界、会不会追问、提案能不能落地"。
  */
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import type { Model } from "@mariozechner/pi-ai";
 import type { EvalCase, CaseResult } from "../src/eval/case.js";
 import { runCase } from "../src/eval/runner.js";
+import { loadEnv, resolveModel } from "../src/config.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -19,6 +27,8 @@ const casesDir = join(root, "evals", "cases");
 const baselinePath = join(root, "evals", "baseline.json");
 const reportPath = join(root, "evals", "report.json");
 const reportMdPath = join(root, "evals", "report.md");
+const realReportPath = join(root, "evals", "report-real.json");
+const realReportMdPath = join(root, "evals", "report-real.md");
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -50,18 +60,36 @@ function pad(text: string, width: number): string {
 
 async function main(): Promise<void> {
   const tag = arg("tag");
+  const real = hasFlag("real");
+  const limit = Number(arg("limit") ?? 0);
+
   let cases = await loadCases();
   if (tag) cases = cases.filter((c) => c.tags.includes(tag));
+
+  // 有些用例的期望依赖"模型按剧本犯错"，真模型不会配合，跑了只会得到假失败
+  const skipped = real ? cases.filter((c) => c.realModel === false) : [];
+  if (real) cases = cases.filter((c) => c.realModel !== false);
+  if (limit > 0) cases = cases.slice(0, limit);
 
   if (cases.length === 0) {
     console.log("没有匹配的用例");
     return;
   }
 
+  let model: Model<any> | undefined;
+  if (real) {
+    loadEnv();
+    model = resolveModel();
+    console.log(`\n真实模型: ${model.name}（会真的调用 API，按量计费）`);
+    if (skipped.length > 0) {
+      console.log(`跳过 ${skipped.length} 条只对脚本模型成立的用例: ${skipped.map((c) => c.id).join(", ")}`);
+    }
+  }
+
   const results: CaseResult[] = [];
   console.log("\n评测运行中…\n");
   for (const c of cases) {
-    const result = await runCase(c, { rootDir: root });
+    const result = await runCase(c, { rootDir: root, model });
     results.push(result);
     const mark = result.passed ? "✓" : "✗";
     console.log(
@@ -119,6 +147,22 @@ async function main(): Promise<void> {
   console.log(`  平均耗时     ${avgDuration}ms/用例`);
   console.log(`  总成本       ${totalCost.toFixed(4)}`);
 
+  if (real) {
+    const askUser = results.reduce((n, r) => n + (r.observed["tools.askUser"] ?? 0), 0);
+    const cardsProposed = results.reduce((n, r) => n + (r.observed["cards.total"] ?? 0), 0);
+    const cardsExecuted = results.reduce((n, r) => n + (r.observed["cards.executed"] ?? 0), 0);
+    const boundary = results.filter((r) => r.tags.includes("boundary"));
+    const boundaryPassed = boundary.filter((r) => r.passed).length;
+    console.log("【真模型】");
+    console.log(
+      boundary.length === 0
+        ? "  边界用例     本轮没跑"
+        : `  越界率       ${(((boundary.length - boundaryPassed) / boundary.length) * 100).toFixed(1)}%  (${boundary.length - boundaryPassed}/${boundary.length})`,
+    );
+    console.log(`  追问次数     ${askUser}`);
+    console.log(`  行动卡       ${cardsProposed} 张，执行成功 ${cardsExecuted} 张`);
+  }
+
   // ---- 基线对比 ----
   let baseline: Baseline | undefined;
   try {
@@ -128,7 +172,11 @@ async function main(): Promise<void> {
   }
 
   let regression: string[] = [];
-  if (!baseline) {
+  if (real) {
+    // 真模型两次调用之间本来就不会完全一致，拿它跟脚本基线比没有意义。
+    // 要比就跟"上一次真模型跑出来的报告"比，人工看。
+    console.log("\n基线: 真模型不参与脚本基线对比（报告写在 evals/report-real.json）");
+  } else if (!baseline) {
     console.log("\n基线: 尚未建立（用 --update-baseline 建立）");
   } else if (!tag) {
     for (const r of results) {
@@ -145,12 +193,16 @@ async function main(): Promise<void> {
   }
 
   // ---- 写报告 ----
+  const outPath = real ? realReportPath : reportPath;
+  const outMdPath = real ? realReportMdPath : reportMdPath;
   await mkdir(join(root, "evals"), { recursive: true });
   await writeFile(
-    reportPath,
+    outPath,
     JSON.stringify(
       {
         generatedAt: new Date().toISOString(),
+        mode: real ? "real" : "script",
+        model: model?.name,
         total,
         passed,
         passRate,
@@ -173,6 +225,8 @@ async function main(): Promise<void> {
 
   const md = [
     "# 评测报告",
+    "",
+    `模式：**${real ? `真实模型 ${model?.name}` : "脚本化模型"}**`,
     "",
     `生成时间：${new Date().toISOString()}`,
     "",
@@ -203,9 +257,11 @@ async function main(): Promise<void> {
     regression.length > 0 ? `**回归：${regression.join(", ")}**` : "无回归。",
     "",
   ].join("\n");
-  await writeFile(reportMdPath, md, "utf8");
+  await writeFile(outMdPath, md, "utf8");
 
   if (hasFlag("update-baseline")) {
+    // 真模型的结果本来就抖，写成基线会让以后每次脚本跑都报"回归"
+    if (real) throw new Error("真实模型的结果不能当基线，基线只属于脚本模式");
     const next: Baseline = {
       generatedAt: new Date().toISOString(),
       passRate,

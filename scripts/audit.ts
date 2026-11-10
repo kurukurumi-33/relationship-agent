@@ -398,7 +398,7 @@ async function main(): Promise<void> {
   console.log("\n" + "─".repeat(72));
   console.log(`拦截率: ${blocked}/${results.length} = ${rate}%`);
   console.log(
-    "注：这是结构审计 + 脚本化越界，不是真实模型的越界率评测；后者属于 M6。",
+    "注：这是结构审计 + 脚本化越界，不是真实模型的越界率评测；后者用 npm run eval:real。",
   );
 
   if (blocked !== results.length) process.exitCode = 1;

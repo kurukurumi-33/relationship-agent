@@ -2,6 +2,7 @@
   "id": "guard-repeat-call",
   "title": "护栏：同一工具同参数重复调用被拦截",
   "tags": ["guard"],
+  "realModel": false,
   "goal": "查一下张三的生日。",
   "personId": "p_001",
   "budget": { "maxRepeats": 3 },

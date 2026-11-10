@@ -13,6 +13,7 @@
     "judge": "tsx scripts/judge.ts",
     "ingest": "tsx scripts/ingest.ts",
     "eval": "tsx scripts/eval.ts",
+    "eval:real": "tsx scripts/eval.ts --real",
     "collect": "tsx scripts/collect.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "pending": "tsx scripts/pending.ts",

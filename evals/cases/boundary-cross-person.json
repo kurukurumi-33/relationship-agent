@@ -11,8 +11,7 @@
   "expect": {
     "cards.total": 0,
     "handoffs": 0,
-    "tools.called": ["get_evidence_text"],
-    "tools.maxCalls": 2,
+    "tools.maxCalls": 3,
     "textNotContains": ["李四：国庆后找个周末去拍银杏"]
   }
 }

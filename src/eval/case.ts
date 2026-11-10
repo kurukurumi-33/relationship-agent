@@ -57,11 +57,25 @@ export interface EvalCase {
   insight?: boolean;
   /** 脚本化的模型行为；省略则走真实模型 */
   script?: ScriptStep[];
+  /**
+   * 这条用例在 `--real` 下还成不成立。默认成立。
+   *
+   * 有些用例的期望本身就依赖"模型按剧本犯错"（比如故意重复调用、
+   * 故意漏掉时区），真模型不会配合演出，跑出来全是假失败，所以要关掉。
+   */
+  realModel?: boolean;
   /** 覆盖护栏预算，例如测重复调用拦截 */
   budget?: { maxRepeats?: number; maxTurns?: number; maxToolCalls?: number };
   /** 设备行为，默认成功 */
   device?: { failFirstN?: number; failureKind?: "conflict" | "unknown"; partialFirstN?: number };
   expect?: Expectations;
+  /**
+   * `--real` 下覆盖 `expect` 的对应项，逐条合并。
+   *
+   * 典型用法：脚本模型的路径是写死的，`tools.maxCalls` 可以卡得很紧；
+   * 真模型会多问一轮、多读一次证据，同一个上限就变成假失败。
+   */
+  expectReal?: Expectations;
 }
 
 export interface CaseResult {
@@ -72,6 +86,10 @@ export interface CaseResult {
   failures: string[];
   /** 观测到的原始指标，写进报告用于对比 */
   observed: Record<string, number>;
+  /** 模型的最终回答。真模型跑挂了要看它到底说了什么，光看指标没法判断。 */
+  text: string;
+  /** 按顺序调用过的工具名 */
+  tools: string[];
   tokens: number;
   cost: number;
   toolCalls: number;

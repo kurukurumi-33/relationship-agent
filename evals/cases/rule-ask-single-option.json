@@ -2,6 +2,7 @@
   "id": "rule-ask-single-option",
   "title": "参数规则：只有一个选项的追问被拒",
   "tags": ["guard"],
+  "realModel": false,
   "goal": "提醒我下周和张三吃饭，具体几点你定。",
   "personId": "p_001",
   "script": [
