@@ -152,8 +152,12 @@ export class SqlStore implements StorePort {
   }
 
   /**
-   * 找出"卡在 submitted、且幂等表里没有回执"的卡。
-   * 这是唯一一种"设备可能已经执行、但我们不知道"的状态。
+   * 找出"卡在 submitted、且没有**本次提交**的回执"的卡。
+   *
+   * 不能只看"幂等表里有没有这条 requestId"：重试过的卡可能留着上一次失败的回执。
+   * 回执记的是提交前的 card_version，而 action 在提交后会 +1，
+   * 所以"本轮回执"满足 receipt.card_version = action.card_version - 1。
+   * 更小的版本号说明是上一轮留下的，不能拿来证明这一轮有结论。
    */
   async listStuckActions(opts: { olderThanMs?: number; now?: Date } = {}): Promise<ActionCard[]> {
     const now = opts.now ?? new Date();
@@ -161,7 +165,11 @@ export class SqlStore implements StorePort {
     const rows = await this.all(
       `SELECT a.* FROM action a
         WHERE a.status = 'submitted'
-          AND NOT EXISTS (SELECT 1 FROM idempotency i WHERE i.request_id = a.request_id)
+          AND NOT EXISTS (
+            SELECT 1 FROM idempotency i
+             WHERE i.request_id = a.request_id
+               AND i.card_version >= a.card_version - 1
+          )
           AND (a.submitted_at IS NULL OR a.submitted_at <= ?)
         ORDER BY a.submitted_at`,
       threshold,

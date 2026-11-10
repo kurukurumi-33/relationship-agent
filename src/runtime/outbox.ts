@@ -72,34 +72,57 @@ export class Outbox {
     });
 
     let receipt: Receipt;
+    let outcomeUnknown = false;
     try {
       receipt = await this.device.execute({ ...current, submittedAt });
     } catch (err) {
-      receipt = {
-        requestId: card.requestId,
-        deviceId: this.device.id,
-        status: "failed",
-        at: new Date().toISOString(),
-        detail: `设备异常: ${(err as Error).message}`,
-        retryable: false, // 异常不等于冲突，不允许盲目重试
-      };
+      // 异常只说明"这次调用没拿到结果"，不说明设备没执行。
+      // 按 DeviceAdapter 的契约先查设备账本：undefined = 确认没执行，抛异常 = 不知道。
+      let found: Receipt | undefined;
+      let queryFailed = !this.device.lookup;
+      if (this.device.lookup) {
+        try {
+          found = await this.device.lookup(card.requestId);
+        } catch {
+          queryFailed = true;
+        }
+      }
+      const at = new Date().toISOString();
+      if (found) {
+        receipt = found;
+      } else if (queryFailed) {
+        // 查不到 ≠ 没执行。状态未知时先不写回执，卡留在 submitted 等对账。
+        outcomeUnknown = true;
+        receipt = {
+          requestId: card.requestId,
+          deviceId: this.device.id,
+          status: "failed",
+          at,
+          detail: `设备异常且无法查证，等待对账: ${(err as Error).message}`,
+          retryable: false,
+        };
+      } else {
+        receipt = {
+          requestId: card.requestId,
+          deviceId: this.device.id,
+          status: "failed",
+          at,
+          detail: `设备异常: ${(err as Error).message}`,
+          retryable: false,
+        };
+      }
     }
 
-    // 3. 回执落盘（幂等表），再把状态推进到终态
-    await this.store.recordReceipt({
-      requestId: card.requestId,
-      cardVersion: submitVersion,
-      submittedAt,
-      receipt,
-    });
+    if (outcomeUnknown) {
+      return { card: await this.store.getAction(card.requestId), receipt, reused: false };
+    }
 
-    const afterSubmit = await this.store.getAction(card.requestId);
-    // partial 记为 executed：设备确实做了一部分，剩余跟进由 receipt.detail 承载
-    const nextStatus = receipt.status === "failed" ? "failed" : "executed";
-    const card2 = await this.store.updateAction(card.requestId, afterSubmit.cardVersion, {
-      status: nextStatus,
-      receipt,
-    });
+    // 3. 回执落盘 + 状态推进，必须原子完成。
+    // 拆成 recordReceipt / updateAction 两步的话，进程死在中间会留下
+    // "回执已在、状态还在 submitted" 的卡：对账按版本号判断它本轮已有结论，
+    // 于是既不对账也不重发，永远停在 submitted。
+    const submitted = await this.store.getAction(card.requestId);
+    const card2 = await this.store.adoptReceipt(submitted, receipt);
 
     return { card: card2, receipt, reused: false };
   }

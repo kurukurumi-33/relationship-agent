@@ -18,6 +18,8 @@
     "pending": "tsx scripts/pending.ts",
     "confirm": "tsx scripts/confirm.ts",
     "execute": "tsx scripts/execute.ts",
+    "soak": "tsx scripts/soak.ts",
+    "crash": "tsx scripts/crash.ts",
     "migrate-json": "tsx scripts/migrate-json.ts",
     "typecheck": "tsc --noEmit",
     "pg-check": "tsx scripts/pg-check.ts",

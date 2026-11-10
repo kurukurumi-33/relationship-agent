@@ -16,6 +16,7 @@ import { reconcile } from "../src/runtime/reconcile.js";
 import { confirmAction } from "../src/runtime/confirm.js";
 import { executeConfirmed } from "../src/runtime/executor.js";
 import type { DeviceAdapter } from "../src/runtime/device.js";
+import type { Receipt } from "../src/domain/types.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -660,6 +661,117 @@ async function main(): Promise<void> {
 
   await runStore2.close();
   await runStore.close();
+
+  // ---------- 16. 状态未知：可能已执行不能写成确定失败 ----------
+  console.log("\n[16] 回执丢失：可能已执行 ≠ 确定失败");
+  const unknownState = join(root, "data", "smoke-unknown.db");
+  await Store.reset(unknownState);
+  const unknownStore = await Store.open(unknownState);
+  await unknownStore.seedIfEmpty(seedState);
+
+  const makeConfirmed = async (title: string) => {
+    const card = await unknownStore.createAction({
+      personId: "p_001",
+      kind: "reminder",
+      title,
+      payload: { at: "2026-11-21T09:00:00+08:00" },
+      reason: "回执丢失测试",
+      sourceIds: ["ev_001"],
+    });
+    return confirmAction(unknownStore, {
+      requestId: card.requestId,
+      cardVersion: card.cardVersion,
+      decision: "approve",
+    });
+  };
+
+  // 设备没有查询能力：异常之后状态未知，不能猜
+  const blindDevice: DeviceAdapter = {
+    id: "blind-device",
+    execute: async () => {
+      throw new Error("网络中断，回执丢失");
+    },
+  };
+  const blindCard = await makeConfirmed("无查询能力");
+  await new Outbox(unknownStore, blindDevice).submit(blindCard);
+
+  check(
+    "查不到设备时卡留在 submitted",
+    (await unknownStore.getAction(blindCard.requestId)).status === "submitted",
+  );
+  check(
+    "状态未知时不写回执",
+    (await unknownStore.getReceipt(blindCard.requestId)) === undefined,
+  );
+  check(
+    "对账能扫到这张卡",
+    (await unknownStore.listStuckActions({ olderThanMs: 0 })).some(
+      (c) => c.requestId === blindCard.requestId,
+    ),
+  );
+
+  // 设备能查询，并且账本里确实有记录：按设备事实推进
+  const recoveringCard = await makeConfirmed("设备已执行");
+  const foundReceipt: Receipt = {
+    requestId: recoveringCard.requestId,
+    deviceId: "recovering-device",
+    status: "ok",
+    at: new Date().toISOString(),
+  };
+  const recoveringDevice: DeviceAdapter = {
+    id: "recovering-device",
+    execute: async () => {
+      throw new Error("回执在返回路上丢了");
+    },
+    lookup: async (requestId) => (requestId === recoveringCard.requestId ? foundReceipt : undefined),
+  };
+  await new Outbox(unknownStore, recoveringDevice).submit(recoveringCard);
+
+  check(
+    "查到设备回执后按回执推进",
+    (await unknownStore.getAction(recoveringCard.requestId)).status === "executed",
+  );
+  check(
+    "回执被补写",
+    (await unknownStore.getReceipt(recoveringCard.requestId))?.status === "ok",
+  );
+
+  // 上一轮留下的失败回执，不能证明这一轮已经有结论
+  const retriedCard = await makeConfirmed("重试后的未知状态");
+  const afterSubmit = await unknownStore.updateAction(
+    retriedCard.requestId,
+    retriedCard.cardVersion,
+    { status: "submitted", submittedAt: new Date().toISOString() },
+  );
+  await unknownStore.recordReceipt({
+    requestId: retriedCard.requestId,
+    cardVersion: afterSubmit.cardVersion - 1,
+    submittedAt: afterSubmit.submittedAt ?? new Date().toISOString(),
+    receipt: {
+      requestId: retriedCard.requestId,
+      deviceId: "old-device",
+      status: "failed",
+      at: new Date().toISOString(),
+      retryable: true,
+    },
+  });
+  const withFreshReceipt = await unknownStore.listStuckActions({ olderThanMs: 0 });
+  check(
+    "本轮已有回执的卡不算悬挂",
+    !withFreshReceipt.some((c) => c.requestId === retriedCard.requestId),
+  );
+
+  await unknownStore.updateAction(retriedCard.requestId, afterSubmit.cardVersion, {
+    status: "submitted",
+    submittedAt: new Date(Date.now() - 1).toISOString(),
+  });
+  const afterRetry = await unknownStore.listStuckActions({ olderThanMs: 0 });
+  check(
+    "上一轮回执不能证明本轮，仍算悬挂",
+    afterRetry.some((c) => c.requestId === retriedCard.requestId),
+  );
+
+  await unknownStore.close();
 
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;
