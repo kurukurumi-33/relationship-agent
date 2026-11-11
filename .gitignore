@@ -20,5 +20,6 @@ evals/report.partial.md
 evals/report-real.partial.json
 evals/report-real.partial.md
 evals/probe.json
+evals/cache-probe.json
 .env
 *.log

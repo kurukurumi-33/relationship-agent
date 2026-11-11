@@ -15,6 +15,7 @@
     "eval": "tsx scripts/eval.ts",
     "eval:real": "tsx scripts/eval.ts --real",
     "probe": "tsx scripts/probe.ts",
+    "cache-probe": "tsx scripts/cache-probe.ts",
     "collect": "tsx scripts/collect.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "pending": "tsx scripts/pending.ts",

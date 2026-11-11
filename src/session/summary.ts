@@ -240,13 +240,20 @@ function truncationMessage(dropped: number): AgentMessage {
 /**
  * 按消息条数压缩，并在有条件时生成摘要。
  *
+ * 用滞回而不是每轮滑窗：超过 maxMessages（高水位）才触发，一次压到 lowWater（低水位）。
+ * 两次压缩之间上下文只在末尾追加，前缀不动，prompt cache 能连续命中；
+ * 每轮都切回高水位的旧做法会让保留窗口整体前移，摘要之后的前缀每轮都变，缓存全失效。
+ *
  * 摘要不是每轮都重做：新裁掉的消息少于 minNewMessages 就先沿用旧摘要，
  * 否则一到阈值就会每轮调一次模型，费用和延迟都不划算。
  */
 export async function compactMessages(
   messages: AgentMessage[],
   opts: {
+    /** 高水位：超过才触发压缩 */
     maxMessages: number;
+    /** 低水位：触发后压到这个长度附近；默认高水位的 60%，传 maxMessages 等于旧版滑窗 */
+    lowWater?: number;
     model?: Model<any>;
     minNewMessages?: number;
     previous?: SessionSummary;
@@ -257,7 +264,11 @@ export async function compactMessages(
   let summary = opts.previous;
   // 固定占两条：保留的第一条用户消息，以及一条摘要/截断说明
   const reserve = 2;
-  let cut = messages.length - Math.max(opts.maxMessages - reserve, 1);
+  const low = Math.min(
+    opts.lowWater ?? Math.max(4, Math.floor(opts.maxMessages * 0.6)),
+    opts.maxMessages,
+  );
+  let cut = messages.length - Math.max(low - reserve, 1);
   while (cut < messages.length && messages[cut]?.role !== "user") cut += 1;
   if (cut >= messages.length || cut <= 1) return { messages, dropped: 0, summary };
 

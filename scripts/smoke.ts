@@ -969,6 +969,65 @@ async function main(): Promise<void> {
   check("8 条覆盖 8 个不同关键词", distinct.size === 8, distinct.size);
   await recallStore.close();
 
+  // ---------- 20. 滞回式压缩：高水位触发、低水位回落 ----------
+  console.log("\n[20] 上下文压缩：高水位触发、低水位回落");
+  const pair = (msgs: AgentMessage[], n: number): void => {
+    msgs.push({ role: "user", content: `u${n}`, timestamp: n } as unknown as AgentMessage);
+    msgs.push({
+      role: "assistant",
+      content: [],
+      api: "faux",
+      provider: "faux",
+      model: "f",
+      usage: {},
+      stopReason: "stop",
+      timestamp: n,
+    } as unknown as AgentMessage);
+  };
+
+  const seeded: AgentMessage[] = [];
+  for (let i = 0; i < 11; i += 1) pair(seeded, i);
+  const firstCompact = await compactMessages(seeded, { maxMessages: 20, lowWater: 12 });
+  check("触发后压到低水位", firstCompact.messages.length <= 12, firstCompact.messages.length);
+
+  let quietMsgs = firstCompact.messages;
+  let quiet = 0;
+  let untouched = 0;
+  for (let i = 0; i < 3; i += 1) {
+    const next = quietMsgs.slice();
+    pair(next, 100 + i);
+    const r = await compactMessages(next, { maxMessages: 20, lowWater: 12 });
+    if (r.dropped === 0) quiet += 1;
+    if (r.dropped === 0 && r.messages === next) untouched += 1;
+    quietMsgs = r.messages;
+  }
+  check("压缩后连续三轮不再触发", quiet === 3, quiet);
+  check("不触发时原数组原样返回", untouched === 3, untouched);
+
+  const simulate = async (lowWater: number) => {
+    let msgs: AgentMessage[] = [];
+    let compactions = 0;
+    let totalLen = 0;
+    let peak = 0;
+    for (let turn = 0; turn < 30; turn += 1) {
+      pair(msgs, turn);
+      const r = await compactMessages(msgs, { maxMessages: 20, lowWater });
+      if (r.dropped > 0) compactions += 1;
+      msgs = r.messages;
+      totalLen += msgs.length;
+      peak = Math.max(peak, msgs.length);
+    }
+    return { compactions, avg: totalLen / 30, peak };
+  };
+  const sliding = await simulate(20);
+  const hysteretic = await simulate(12);
+  check("滞回压缩次数少于滑窗", hysteretic.compactions < sliding.compactions, {
+    hysteretic,
+    sliding,
+  });
+  check("滞回平均上下文更短", hysteretic.avg < sliding.avg, { hysteretic, sliding });
+  check("滞回峰值不超过高水位", hysteretic.peak <= 20, hysteretic.peak);
+
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
