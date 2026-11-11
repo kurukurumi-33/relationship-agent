@@ -13,7 +13,7 @@ import { runSession } from "../session/run.js";
 import { Outbox } from "../runtime/outbox.js";
 import { MockDevice } from "../runtime/device.js";
 import { DEFAULT_BUDGET, type Budget } from "../agent/guard.js";
-import type { CaseResult, EvalCase, Expectations, ScriptStep } from "./case.js";
+import type { CaseResult, EvalCase, Expectations, RealExpectations, ScriptStep } from "./case.js";
 
 interface RunCaseOptions {
   rootDir: string;
@@ -49,6 +49,17 @@ function toolErrorsFrom(messages: unknown[]): number {
     if (m.role === "toolResult" && m.isError) errors += 1;
   }
   return errors;
+}
+
+/** 合并 `expect` 与 `expectReal`；`expectReal` 里写 null 的项会被删掉。 */
+function mergeExpect(scripted: Expectations, real: RealExpectations | undefined): Expectations {
+  if (!real) return scripted;
+  const merged: Record<string, unknown> = { ...scripted };
+  for (const [key, value] of Object.entries(real)) {
+    if (value === null) delete merged[key];
+    else merged[key] = value;
+  }
+  return merged as Expectations;
 }
 
 function checkExpectations(
@@ -169,11 +180,12 @@ export async function runCase(testCase: EvalCase, opts: RunCaseOptions): Promise
     "guard.blocked": result.stats.blockedCalls,
     "tools.total": tools.length,
     "tools.errors": toolErrors,
+    "tools.denied": result.stats.deniedCalls,
     "tools.askUser": tools.filter((t) => t === "ask_user").length,
   };
 
   const failures = checkExpectations(
-    usingRealModel ? { ...testCase.expect, ...testCase.expectReal } : (testCase.expect ?? {}),
+    usingRealModel ? mergeExpect(testCase.expect ?? {}, testCase.expectReal) : (testCase.expect ?? {}),
     observed,
     result.text,
     tools,

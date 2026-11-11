@@ -29,6 +29,8 @@ export interface GuardStats {
   toolCalls: number;
   blockedCalls: number;
   failedToolCalls: number;
+  /** 被权限边界拒掉的调用：评测里的"越界尝试"数就是它 */
+  deniedCalls: number;
   exceededReason?: string;
 }
 
@@ -40,7 +42,13 @@ export interface GuardStats {
  * 这里把上限做成显式预算，超了就中断并把原因写进结果，而不是静默截断。
  */
 export class RunGuard {
-  readonly stats: GuardStats = { turns: 0, toolCalls: 0, blockedCalls: 0, failedToolCalls: 0 };
+  readonly stats: GuardStats = {
+    turns: 0,
+    toolCalls: 0,
+    blockedCalls: 0,
+    failedToolCalls: 0,
+    deniedCalls: 0,
+  };
   private readonly callCounts = new Map<string, number>();
   private callsThisTurn = 0;
   private consecutiveFailures = 0;

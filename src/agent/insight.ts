@@ -1,8 +1,10 @@
 import { Agent } from "@mariozechner/pi-agent-core";
-import type { AgentEvent, AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentEvent, AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { Type, type Model } from "@mariozechner/pi-ai";
 import type { FactConflict, MemoryCandidate, Receipt } from "../domain/types.js";
 import type { Store } from "../store/store.js";
+import { PermissionDeniedError } from "../errors.js";
+import { withDeniedCount } from "./tools.js";
 import { DEFAULT_BUDGET, RunGuard, type Budget } from "./guard.js";
 
 export interface InsightOptions {
@@ -65,6 +67,8 @@ export async function runInsight(opts: {
   receipts: Receipt[];
   budget?: Budget;
   onEvent?: (event: AgentEvent) => void;
+  /** 权限边界拦下一次调用时回调，由外层累计进会话统计 */
+  onDenied?: () => void;
 }): Promise<InsightResult> {
   const { store, personId, sessionId } = opts;
   const created: MemoryCandidate[] = [];
@@ -100,7 +104,7 @@ export async function runInsight(opts: {
       parameters: Type.Object({ evidenceId: Type.String() }),
       execute: async (_id: string, params: { evidenceId: string }) => {
         const ev = await store.getEvidence(params.evidenceId);
-        if (ev.personId !== personId) throw new Error("证据不属于当前联系人");
+        if (ev.personId !== personId) throw new PermissionDeniedError("证据不属于当前联系人");
         return {
           content: text(store.isExpired(ev) ? (ev.summary ?? "原始材料已过期") : ev.content),
           details: {},
@@ -215,7 +219,12 @@ export async function runInsight(opts: {
   const guard = new RunGuard(opts.budget ?? INSIGHT_BUDGET, () => agent.abort());
 
   agent = new Agent({
-    initialState: { systemPrompt, model: opts.model, tools: tools as never[], messages: [] },
+    initialState: {
+      systemPrompt,
+      model: opts.model,
+      tools: tools.map((t) => withDeniedCount(t as AgentTool<any>, opts.onDenied)) as never[],
+      messages: [],
+    },
     beforeToolCall: async (ctx) => guard.beforeToolCall({ toolCall: ctx.toolCall, args: ctx.args }),
     afterToolCall: async (ctx) => guard.afterToolCall({ isError: ctx.isError }),
     toolExecution: "sequential",

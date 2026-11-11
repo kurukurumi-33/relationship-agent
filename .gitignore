@@ -15,5 +15,10 @@ evals/report.json
 evals/report.md
 evals/report-real.json
 evals/report-real.md
+evals/report.partial.json
+evals/report.partial.md
+evals/report-real.partial.json
+evals/report-real.partial.md
+evals/probe.json
 .env
 *.log

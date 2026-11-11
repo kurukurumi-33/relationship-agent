@@ -11,7 +11,8 @@ import { DEFAULT_BUDGET, RunGuard, type Budget, type GuardStats } from "../agent
 import { checkToolRules } from "../agent/rules.js";
 import type { ConfirmHandler, ReviewHandler } from "../runtime/survey.js";
 import type { Outbox } from "../runtime/outbox.js";
-import { makeContextPruner, repairToolPairing } from "./resume.js";
+import { repairToolPairing } from "./resume.js";
+import { compactMessages, parseSummary } from "./summary.js";
 import { runInsight, type InsightOptions } from "../agent/insight.js";
 
 export interface RunSessionOptions {
@@ -33,6 +34,17 @@ export interface RunSessionOptions {
   resumeMessages?: AgentMessage[];
   /** 会话压缩阈值（消息条数）；0 或未设置表示不压缩 */
   maxContextMessages?: number;
+  /**
+   * 压缩时生成结构化摘要（而不是只截断）。
+   * 摘要常驻上下文，原文仍可用 recall_history 检索。
+   */
+  summarizeContext?: {
+    model: Model<any>;
+    /** 新裁掉多少条才重新摘要，默认 8；低于这个数沿用旧摘要 */
+    minNewMessages?: number;
+  };
+  /** 禁用的工具名，评测里用来做 A/B（比如去掉检索工具看摘要本身的效果） */
+  disableTools?: string[];
   /** 洞察 Agent：提供后，候选记忆必须先过它这一关才能到用户面前 */
   insight?: InsightOptions;
   /**
@@ -142,7 +154,7 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
           .filter((r): r is Receipt => Boolean(r)),
         candidates: [],
         appliedMemories: [],
-        stats: { turns: 0, toolCalls: 0, blockedCalls: 0, failedToolCalls: 0 },
+        stats: { turns: 0, toolCalls: 0, blockedCalls: 0, failedToolCalls: 0, deniedCalls: 0 },
         repairedOnResume: 0,
         replayed: true,
         insight: undefined,
@@ -169,14 +181,21 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
   let agent: Agent;
   const guard = new RunGuard(budget, () => agent.abort());
 
-  const tools = createTools({
+  const created = createTools({
     store,
     personId,
     sessionId,
     survey: opts.survey,
     onProposedAction: (card) => proposedCards.push(card),
     onProposedMemory: (candidate) => candidates.push(candidate),
+    // 权限边界拒掉的调用单独计数：它就是评测里的"越界尝试"
+    onDenied: () => {
+      guard.stats.deniedCalls += 1;
+    },
   });
+  const tools = opts.disableTools?.length
+    ? created.filter((t) => !opts.disableTools!.includes(t.name))
+    : created;
 
   let repairedOnResume = 0;
   let messages: AgentMessage[] = [];
@@ -198,10 +217,7 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
     updatedAt: now,
   });
 
-  const prune =
-    opts.maxContextMessages && opts.maxContextMessages > 0
-      ? makeContextPruner(opts.maxContextMessages)
-      : undefined;
+  const maxContextMessages = opts.maxContextMessages ?? 0;
 
   agent = new Agent({
     initialState: {
@@ -222,44 +238,53 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
       return { block: true, reason: `${violation.reason}（规则 ${violation.rule}）` };
     },
     afterToolCall: async (ctx) => guard.afterToolCall({ isError: ctx.isError }),
-    // 压缩：切割点落在 user 消息前，压缩本身也记账（带 generation CAS）
-    transformContext: prune
-      ? async (msgs) => {
-          const before = msgs.length;
-          const pruned = await prune(msgs);
-          if (pruned.length < before) {
-            const generation = (await store.getCompaction(sessionId))?.generation ?? 0;
-            try {
-              await store.recordCompaction(sessionId, generation, {
-                droppedMessages: before - pruned.length,
-                keptMessages: pruned.length,
-                at: new Date().toISOString(),
-              });
-            } catch (err) {
-              // 压缩账本冲突不应阻断对话，但要留痕
-              opts.onEvent?.({
-                type: "message_end",
-                message: {
-                  role: "assistant",
-                  content: [
-                    {
-                      type: "text",
-                      text: `[compaction-conflict] ${(err as Error).message}`,
-                    },
-                  ],
-                  api: "internal",
-                  provider: "internal",
-                  model: "internal",
-                  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
-                  stopReason: "stop",
-                  timestamp: Date.now(),
-                },
-              } as AgentEvent);
+    // 压缩：切割点落在 user 消息前。有模型时把裁掉的部分生成结构化摘要，
+    // 原文仍留在会话存档里，模型可以用 recall_history 取回。压缩本身也记账（带 generation CAS）。
+    transformContext:
+      maxContextMessages > 0
+        ? async (msgs) => {
+            const before = msgs.length;
+            const previous = parseSummary((await store.getCompaction(sessionId))?.summary);
+            const compacted = await compactMessages(msgs, {
+              maxMessages: maxContextMessages,
+              model: opts.summarizeContext?.model,
+              minNewMessages: opts.summarizeContext?.minNewMessages,
+              previous,
+            });
+            if (compacted.messages.length < before) {
+              const generation = (await store.getCompaction(sessionId))?.generation ?? 0;
+              try {
+                await store.recordCompaction(sessionId, generation, {
+                  droppedMessages: compacted.dropped,
+                  keptMessages: compacted.messages.length,
+                  summary: compacted.summary ? JSON.stringify(compacted.summary) : undefined,
+                  at: new Date().toISOString(),
+                });
+              } catch (err) {
+                // 压缩账本冲突不应阻断对话，但要留痕
+                opts.onEvent?.({
+                  type: "message_end",
+                  message: {
+                    role: "assistant",
+                    content: [
+                      {
+                        type: "text",
+                        text: `[compaction-conflict] ${(err as Error).message}`,
+                      },
+                    ],
+                    api: "internal",
+                    provider: "internal",
+                    model: "internal",
+                    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+                    stopReason: "stop",
+                    timestamp: Date.now(),
+                  },
+                } as AgentEvent);
+              }
             }
+            return compacted.messages;
           }
-          return pruned;
-        }
-      : undefined,
+        : undefined,
     // 工具按顺序执行：行动卡/记忆候选都是写提案，并行没有收益，还会让日志难读
     toolExecution: "sequential",
   });
@@ -348,6 +373,9 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
       receipts,
       budget: opts.insight.budget,
       onEvent: opts.insight.onEvent,
+      onDenied: () => {
+        guard.stats.deniedCalls += 1;
+      },
     });
     const merged = new Map<string, MemoryCandidate>();
     for (const c of [...candidates, ...insight.candidates]) merged.set(c.candidateId, c);

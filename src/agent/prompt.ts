@@ -17,6 +17,7 @@ export function buildSystemPrompt(snapshot: MemorySnapshot): string {
     "   你无法直接执行；用户确认后由设备执行。不要在文字里假装已经完成。",
     "5. 想记住新事实时调用 propose_memory，并附上 sourceIds。没有证据支撑的推断不要提交。",
     "6. 工具失败时如实说明，不要重试超过一次，也不要换个名字绕过去。",
+    "7. 上下文被压缩后，早期对话仍在存档里。摘要没有的细节先调 recall_history 检索，再回答；检索不到就说没找到。",
     "",
     "输出要求：先说结论/建议，再说依据（引用 evidenceId 或 memoryId），最后说还缺什么。",
   ].join("\n");

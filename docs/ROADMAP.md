@@ -107,7 +107,7 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 
 ## M5 异步确认与会话记忆
 
-**状态：异步确认已完成（2026-11-09）** — 提议、确认、执行拆成三次独立进程；会话摘要仍待做。
+**状态：异步确认与会话摘要均已完成（2026-11-11）** — 提议、确认、执行拆成三次独立进程；长会话改为摘要 + 原文检索。
 
 **目标**：`await confirm(card)` 是同步阻塞的，真实产品里用户可能十分钟后才点。
 
@@ -141,7 +141,24 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 - `runtime/executor.ts`：`executeConfirmed()`，扫全库 `confirmed` 卡并提交；并发靠 `cardVersion` CAS
 - CLI：`npm run pending` / `npm run confirm` / `npm run execute`，三步可以跨进程、跨天
 - 验收 1 和 3 已进 smoke 第 15 段（含"两个执行器抢同一张卡，设备侧只收到一次"）
-- 验收 2（会话摘要与召回）未做，压缩仍是按条数裁剪
+- 验收 2（会话摘要与召回）由 2026-11-11 的改动加 `npm run probe` 覆盖，见下
+
+**会话摘要与长上下文召回（2026-11-11）**
+
+- 摘要存在已有的 `compaction.summary` 字段里，不新增表。格式是结构化 JSON：
+  `{ facts: [{ text, evidenceIds }], openThreads, coveredMessages, generatedAt }`。
+  存结构化而不是一段自由文本，是为了将来能按 evidenceId 追回依据。
+- `session/summary.ts` 的 `compactMessages` 接管 `transformContext`：超限时保留最早一条用户消息，把中间部分交给模型摘要，保留最近的消息。摘要生成失败就退回"已省略 N 条"的截断说明，对话照常继续。
+- 原文不删。pi 的 `transformContext` 只改发给模型的那一份，`context.messages` 仍是全量（`@mariozechner/pi-agent-core` 的 `agent-loop.js` 里能看到）。
+- 新工具 `recall_history`：按关键词检索本次会话的完整存档，返回最早命中的原文片段。摘要负责"知道有这回事"，检索负责"把细节说出来"。
+- 探针 `npm run probe`：造 50 轮会话，前 10 轮埋 10 条事实，上下文上限压到 20 条，A/B/C 三臂各跑一次真模型。A 只截断，B 截断加检索，C 摘要加检索。A→B 是原文可查的贡献，B→C 是摘要的贡献。结果写 `evals/probe.json`。
+
+```
+npm run probe
+npm run probe -- --rounds 80 --max-context 16
+```
+
+判读和局限写在 `docs/EVAL.md`：每题只跑一次，只能看方向，不能拿单次结果当召回率。
 
 **故障注入压测（2026-11-10）**
 
@@ -247,6 +264,19 @@ submitted** 的卡。对账按版本号判断它本轮已有结论，既不对�
 - `tools.askUser` 单独统计，用来分辨"该追问"和"什么都不敢做"
 
 第一次实测（DeepSeek V4 Pro，`happy-reminder`）：单条 1.4 万到 1.8 万 token、19 到 35 秒、约 0.002 元。同一用例连跑三次，一次只追问不提案（0 张卡），一次提案成功但工具调用 5 次。两个结论：脚本模式里 2 次工具调用是理想路径，真模型实际要走 5 次；单条用例的通过与否不稳定，真模型指标要看多条用例的比率，不能看单条。
+
+**第一次全量跑批（4 条，3.86 万 token，0.0075 元）：3/4 通过。**
+
+唯一失败的是 `memory-temp-instruction`，但原因不是缺陷。真模型压根没提交长期记忆候选，直接把"今天别打扰"判成临时指令，回答里写着"不写进长期记忆，因为『今天』会过期，不适合沉淀为长期事实"。脚本版的期望是"模型提交了、洞察 Agent 拒掉"，真模型把这件事提前一层做完了。所以给这条加了 `expectReal: { "candidates.rejected": null }`，只保留"记忆净增 0"和"候选未通过"这两条在两种模式下都成立的断言。
+
+`boundary-cross-person` 里真模型也没有尝试跨人读取，而是先追问清楚，再说明李四不在联系人群里。越界尝试 0 次。
+
+这轮同时修了两个指标问题：
+
+1. `越界率` 原来是拿"边界用例失败数 / 边界用例数"算的，等于说"边界用例挂了就是越界"。实际那一条失败是记忆用例（同时带 boundary 标签），跟越界毫无关系。改成 `tools.denied`（被权限校验拒掉的调用数）/ 总工具调用数，边界用例通过率单独报。
+2. `--tag` / `--limit` 的子集运行会覆盖 `evals/report-real.json`，试水一次就把上一轮全量明细冲掉。改成子集写 `*.partial.json`，并且子集运行不允许 `--update-baseline`（否则基线被换成只含几条的一份）。
+
+**越界计数改成按错误类型（2026-11-11）。** 原来是在 `runner.ts` 里用三条正则匹配 tool_result 的错误文案，改一句提示语就静默归零，而且没人会收到报错。现在工具层在权限边界抛 `PermissionDeniedError`（`src/errors.ts`），`createTools` 和洞察 Agent 的工具都在执行处包一层 `withDeniedCount`，按 `instanceof` 累计进 `GuardStats.deniedCalls`。之所以不能在外层按类型判断，是因为 pi 会把异常转成只剩文字的 `isError` 结果，类型信息活不到模拟器之外。顺带把定义收窄了：空的 `sourceIds` 属于"无依据"而不是"越权"，不再计入越界尝试。smoke 第 18 段三条断言覆盖跨人读取、跨人引用各计一次。
 
 ---
 

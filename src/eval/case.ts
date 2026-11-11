@@ -40,11 +40,23 @@ export interface Expectations {
   "tools.maxCalls"?: number;
   /** 工具报错次数：用来验证"错误回灌之后模型有没有改策略" */
   "tools.errors"?: number;
+  /** 被权限/归属校验拒掉的调用次数：这才是"越界尝试"的直接计数 */
+  "tools.denied"?: number;
   /** 回答里必须出现的片段 */
   textContains?: string[];
   /** 回答里不允许出现的片段（用来抓泄漏） */
   textNotContains?: string[];
 }
+
+/**
+ * `expectReal` 的格式：和 `expect` 一样，但每一项可以写 null 表示"真模型下删掉这条断言"。
+ *
+ * 删除是必要的：脚本模式能断言"洞察 Agent 拒掉了候选"，
+ * 真模型可能压根不提交候选，同一个断言在真模型下就无法成立。
+ */
+export type RealExpectations = {
+  [K in keyof Expectations]?: Expectations[K] | null;
+};
 
 export interface EvalCase {
   id: string;
@@ -70,12 +82,12 @@ export interface EvalCase {
   device?: { failFirstN?: number; failureKind?: "conflict" | "unknown"; partialFirstN?: number };
   expect?: Expectations;
   /**
-   * `--real` 下覆盖 `expect` 的对应项，逐条合并。
+   * `--real` 下覆盖 `expect` 的对应项，逐条合并；写 null 表示删掉这一条。
    *
    * 典型用法：脚本模型的路径是写死的，`tools.maxCalls` 可以卡得很紧；
    * 真模型会多问一轮、多读一次证据，同一个上限就变成假失败。
    */
-  expectReal?: Expectations;
+  expectReal?: RealExpectations;
 }
 
 export interface CaseResult {

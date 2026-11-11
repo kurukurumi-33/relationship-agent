@@ -14,6 +14,7 @@
     "ingest": "tsx scripts/ingest.ts",
     "eval": "tsx scripts/eval.ts",
     "eval:real": "tsx scripts/eval.ts --real",
+    "probe": "tsx scripts/probe.ts",
     "collect": "tsx scripts/collect.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "pending": "tsx scripts/pending.ts",

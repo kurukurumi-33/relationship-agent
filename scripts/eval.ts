@@ -25,10 +25,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const casesDir = join(root, "evals", "cases");
 const baselinePath = join(root, "evals", "baseline.json");
-const reportPath = join(root, "evals", "report.json");
-const reportMdPath = join(root, "evals", "report.md");
-const realReportPath = join(root, "evals", "report-real.json");
-const realReportMdPath = join(root, "evals", "report-real.md");
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -62,6 +58,9 @@ async function main(): Promise<void> {
   const tag = arg("tag");
   const real = hasFlag("real");
   const limit = Number(arg("limit") ?? 0);
+  // 子集运行（--tag / --limit）不能覆盖完整报告，否则跑一次试水就把上一轮全量明细冲掉了
+  const scoped = Boolean(tag) || limit > 0;
+  const outName = `${real ? "report-real" : "report"}${scoped ? ".partial" : ""}`;
 
   let cases = await loadCases();
   if (tag) cases = cases.filter((c) => c.tags.includes(tag));
@@ -153,12 +152,17 @@ async function main(): Promise<void> {
     const cardsExecuted = results.reduce((n, r) => n + (r.observed["cards.executed"] ?? 0), 0);
     const boundary = results.filter((r) => r.tags.includes("boundary"));
     const boundaryPassed = boundary.filter((r) => r.passed).length;
+    const denied = results.reduce((n, r) => n + (r.observed["tools.denied"] ?? 0), 0);
+    const totalCalls = results.reduce((n, r) => n + (r.observed["tools.total"] ?? 0), 0);
     console.log("【真模型】");
     console.log(
       boundary.length === 0
         ? "  边界用例     本轮没跑"
-        : `  越界率       ${(((boundary.length - boundaryPassed) / boundary.length) * 100).toFixed(1)}%  (${boundary.length - boundaryPassed}/${boundary.length})`,
+        : `  边界用例     ${boundaryPassed}/${boundary.length} 通过（失败 ${boundary.length - boundaryPassed} 条，原因看报告）`,
     );
+    // 越界率不能用"边界用例失败数"算：边界用例会因很多原因失败，
+    // 而它挂掉也不等于模型越了界。真正的越界信号是权限校验拒掉了多少次调用。
+    console.log(`  越界尝试     ${denied} 次（被权限校验拒绝），共 ${totalCalls} 次工具调用`);
     console.log(`  追问次数     ${askUser}`);
     console.log(`  行动卡       ${cardsProposed} 张，执行成功 ${cardsExecuted} 张`);
   }
@@ -175,7 +179,7 @@ async function main(): Promise<void> {
   if (real) {
     // 真模型两次调用之间本来就不会完全一致，拿它跟脚本基线比没有意义。
     // 要比就跟"上一次真模型跑出来的报告"比，人工看。
-    console.log("\n基线: 真模型不参与脚本基线对比（报告写在 evals/report-real.json）");
+    console.log(`\n基线: 真模型不参与脚本基线对比（报告写在 evals/${outName}.json）`);
   } else if (!baseline) {
     console.log("\n基线: 尚未建立（用 --update-baseline 建立）");
   } else if (!tag) {
@@ -193,8 +197,9 @@ async function main(): Promise<void> {
   }
 
   // ---- 写报告 ----
-  const outPath = real ? realReportPath : reportPath;
-  const outMdPath = real ? realReportMdPath : reportMdPath;
+  // 子集运行（--tag / --limit）不能覆盖完整报告，否则跑一次试水就把上一轮全量明细冲掉了
+  const outPath = join(root, "evals", `${outName}.json`);
+  const outMdPath = join(root, "evals", `${outName}.md`);
   await mkdir(join(root, "evals"), { recursive: true });
   await writeFile(
     outPath,
@@ -259,9 +264,15 @@ async function main(): Promise<void> {
   ].join("\n");
   await writeFile(outMdPath, md, "utf8");
 
+  if (scoped) {
+    console.log(`\n本次只跑了 ${total} 条子集，报告写到 evals/${outName}.json，完整报告未被覆盖`);
+  }
+
   if (hasFlag("update-baseline")) {
     // 真模型的结果本来就抖，写成基线会让以后每次脚本跑都报"回归"
     if (real) throw new Error("真实模型的结果不能当基线，基线只属于脚本模式");
+    // 子集跑出来的基线只含这几条，另存的用例会被整份覆盖掉
+    if (scoped) throw new Error("子集运行不能更新基线，请跑全量 npm run eval -- --update-baseline");
     const next: Baseline = {
       generatedAt: new Date().toISOString(),
       passRate,

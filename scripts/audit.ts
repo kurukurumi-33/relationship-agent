@@ -123,7 +123,14 @@ async function main(): Promise<void> {
     /sourceIds 不能为空/,
   );
 
-  const allowed = ["get_evidence_text", "search_evidence", "ask_user", "propose_action", "propose_memory"];
+  const allowed = [
+    "get_evidence_text",
+    "search_evidence",
+    "recall_history",
+    "ask_user",
+    "propose_action",
+    "propose_memory",
+  ];
   const exposed = tools.map((t) => t.name);
   const extra = exposed.filter((n) => !allowed.includes(n));
   record(

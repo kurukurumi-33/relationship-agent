@@ -8,7 +8,8 @@ import { MockDevice } from "../src/runtime/device.js";
 import { Outbox } from "../src/runtime/outbox.js";
 import { RunGuard, DEFAULT_BUDGET } from "../src/agent/guard.js";
 import { checkToolRules } from "../src/agent/rules.js";
-import { repairToolPairing, makeContextPruner, injectSurveyResults } from "../src/session/resume.js";
+import { repairToolPairing, injectSurveyResults } from "../src/session/resume.js";
+import { compactMessages } from "../src/session/summary.js";
 import { buildMemorySnapshot } from "../src/agent/snapshot.js";
 import { ingestEvidence } from "../src/ingest/evidence.js";
 import { registerFauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from "@mariozechner/pi-ai";
@@ -82,9 +83,17 @@ async function main(): Promise<void> {
     long.push({ role: "user", content: `u${i}`, timestamp: i } as unknown as AgentMessage);
     long.push({ role: "assistant", content: [], api: "faux", provider: "faux", model: "f", usage: {} , stopReason: "stop", timestamp: i } as unknown as AgentMessage);
   }
-  const pruned = await makeContextPruner(6)(long);
-  check("压缩后长度受限", pruned.length <= 6, pruned.length);
-  check("保留首条用户消息", (pruned[0] as { content: string }).content === "u0");
+  const compacted = await compactMessages(long, { maxMessages: 6 });
+  check("压缩后长度受限", compacted.messages.length <= 6, compacted.messages.length);
+  check("保留首条用户消息", (compacted.messages[0] as { content: string }).content === "u0");
+  check(
+    "截断时告诉模型原文可检索",
+    JSON.stringify(compacted.messages).includes("recall_history"),
+  );
+  check(
+    "切割点落在 user 消息前",
+    (compacted.messages[2] as { role: string; content: string }).role === "user",
+  );
 
   // ---------- 3. 护栏：重复调用拦截 ----------
   console.log("\n[3] 运行护栏：重复调用 / 次数上限");
@@ -876,6 +885,45 @@ async function main(): Promise<void> {
   );
   check("规则拦截计入护栏预算", rulesRun.stats.blockedCalls === 1, rulesRun.stats.blockedCalls);
   await rulesStore.close();
+
+  // 18. 越界尝试按错误类型计数，不靠错误文案
+  const deniedState = join(root, "data", "smoke-denied.db");
+  await Store.reset(deniedState);
+  const deniedStore = await Store.open(deniedState);
+  await deniedStore.seedIfEmpty(seedState);
+
+  const deniedReg = registerFauxProvider({});
+  deniedReg.setResponses([
+    fauxAssistantMessage([fauxToolCall("get_evidence_text", { evidenceId: "ev_101" })], {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(
+      [fauxToolCall("propose_action", { ...baseAction, sourceIds: ["ev_101"] })],
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage([fauxText("两处都被拒了。")]),
+  ]);
+
+  const deniedRun = await runSession({
+    store: deniedStore,
+    personId: "p_001",
+    goal: "读一下李四的记录",
+    model: deniedReg.getModel(),
+    survey: async () => ({}),
+    confirm: async () => true,
+    review: async () => true,
+    outbox: new Outbox(deniedStore, new MockDevice(join(root, "data", "smoke-denied-ledger.jsonl"))),
+  });
+  deniedReg.unregister();
+
+  check("跨人读取与跨人引用各计一次", deniedRun.stats.deniedCalls === 2, deniedRun.stats.deniedCalls);
+  const deniedSession = await deniedStore.getSession(deniedRun.sessionId);
+  const deniedErrors = ((deniedSession?.messages ?? []) as Array<{ role: string; isError?: boolean }>).filter(
+    (m) => m.role === "toolResult" && m.isError,
+  );
+  check("两次越界都回灌了 isError 给模型", deniedErrors.length === 2, deniedErrors.length);
+  check("两次被拒后没有产生行动卡", (await deniedStore.listActions("p_001")).length === 0);
+  await deniedStore.close();
 
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;

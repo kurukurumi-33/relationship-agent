@@ -2,6 +2,7 @@ import { Type } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ActionCard, ActionKind, MemoryCandidate, SurveyQuestion } from "../domain/types.js";
 import type { Store } from "../store/store.js";
+import { PermissionDeniedError } from "../errors.js";
 
 export type { SurveyQuestion };
 
@@ -18,6 +19,8 @@ export interface ToolContext {
   /** 提案回调：host 用它收集本轮产生的行动卡/候选记忆，用于后续确认。 */
   onProposedAction: (card: ActionCard) => void;
   onProposedMemory: (candidate: MemoryCandidate) => void;
+  /** 权限边界拦下一次调用时回调，host 用它统计越界尝试 */
+  onDenied?: () => void;
 }
 
 const text = (value: unknown) => [
@@ -25,6 +28,28 @@ const text = (value: unknown) => [
 ];
 
 const ACTION_KINDS: ActionKind[] = ["reminder", "calendar_event", "draft_message"];
+
+/**
+ * 在工具执行处统计越界，而不是事后翻 tool_result 的文案。
+ *
+ * pi 会把异常转成只有文字的 isError 结果，类型信息到不了外层；
+ * 但工具是我们自己写的，在抛出的地方按 instanceof 数最靠得住。
+ */
+export function withDeniedCount<T extends AgentTool<any>>(tool: T, onDenied?: () => void): T {
+  if (!onDenied) return tool;
+  const execute = tool.execute as (...args: any[]) => Promise<unknown>;
+  return {
+    ...tool,
+    execute: async (...args: any[]) => {
+      try {
+        return await execute(...args);
+      } catch (err) {
+        if (err instanceof PermissionDeniedError) onDenied();
+        throw err;
+      }
+    },
+  } as T;
+}
 
 const EvidenceTextParams = Type.Object({
   evidenceId: Type.String({ description: "快照里给出的 evidenceId" }),
@@ -60,6 +85,33 @@ const ProposeMemoryParams = Type.Object({
   sourceIds: Type.Array(Type.String(), { minItems: 1 }),
 });
 
+const RecallParams = Type.Object({
+  query: Type.String({ description: "要回忆的线索关键词，多个词用空格分隔，例如 复查 医院" }),
+  limit: Type.Optional(Type.Number({ description: "最多返回几条，默认 3，上限 8" })),
+});
+
+/** 从一条消息里抽纯文本：工具结果也参与检索，否则"我上次让你查的东西"就断了。 */
+function messageText(message: unknown): string {
+  const m = message as { content?: unknown };
+  if (typeof m.content === "string") return m.content;
+  if (!Array.isArray(m.content)) return "";
+  return m.content
+    .filter((b): b is { type: "text"; text: string } => {
+      const block = b as { type?: string; text?: unknown };
+      return block.type === "text" && typeof block.text === "string";
+    })
+    .map((b) => b.text)
+    .join("\n");
+}
+
+/** 命中位置前后各取一段，避免把整条长消息塞回上下文。 */
+function excerptAround(text: string, keyword: string): string {
+  const at = text.indexOf(keyword);
+  if (text.length <= 240) return text;
+  const start = Math.max(0, at - 120);
+  return `${start > 0 ? "…" : ""}${text.slice(start, start + 240)}…`;
+}
+
 /**
  * 工具分三类，边界写在类型上：
  *   - 只读：只能返回内容，无法改 store；
@@ -77,7 +129,7 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
     execute: async (_toolCallId, params) => {
       const ev = await ctx.store.getEvidence(params.evidenceId);
       if (ev.personId !== ctx.personId) {
-        throw new Error(`证据 ${params.evidenceId} 不属于当前联系人，拒绝跨人读取`);
+        throw new PermissionDeniedError(`证据 ${params.evidenceId} 不属于当前联系人，拒绝跨人读取`);
       }
       await ctx.store.logAccess({
         sessionId: ctx.sessionId,
@@ -213,5 +265,61 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
     },
   };
 
-  return [getEvidenceText, searchEvidence, askUser, proposeAction, proposeMemory];
+  const recallHistory: AgentTool<typeof RecallParams> = {
+    name: "recall_history",
+    label: "检索会话存档",
+    description:
+      "当上下文里的摘要没有你要的细节时，按关键词检索本次会话的完整存档（包括已被压缩掉的早期对话）。返回命中的原文片段。",
+    parameters: RecallParams,
+    execute: async (_toolCallId, params) => {
+      const keywords = params.query
+        .split(/[\s,，、]+/)
+        .map((k) => k.trim())
+        .filter(Boolean);
+      if (keywords.length === 0) {
+        throw new Error("query 至少要给一个关键词，例如：复查 医院");
+      }
+      const session = await ctx.store.getSession(ctx.sessionId);
+      if (!session) throw new Error("会话存档不存在，无法检索");
+      const messages = session.messages as unknown[];
+      const limit = Math.min(Math.max(params.limit ?? 3, 1), 8);
+
+      const hits: Array<{ index: number; role: string; excerpt: string; matched: string[] }> = [];
+      for (let i = 0; i < messages.length; i += 1) {
+        const body = messageText(messages[i]);
+        if (!body) continue;
+        const matched = keywords.filter((k) => body.includes(k));
+        if (matched.length === 0) continue;
+        hits.push({
+          index: i,
+          role: (messages[i] as { role?: string }).role ?? "unknown",
+          excerpt: excerptAround(body, matched[0]!),
+          matched,
+        });
+      }
+
+      // 取最早的命中：近处的内容本来就在上下文里，存档的价值在远处
+      const top = hits.slice(0, limit);
+      return {
+        content: text({
+          totalMatches: hits.length,
+          hits: top,
+          note:
+            top.length === 0
+              ? "存档里没有匹配的内容。不要据此编造，直接说明没找到。"
+              : "这些是对话原文片段，引用时说明出自哪一轮。",
+        }),
+        details: { totalMatches: hits.length, returned: top.length },
+      };
+    },
+  };
+
+  return [
+    getEvidenceText,
+    searchEvidence,
+    askUser,
+    proposeAction,
+    proposeMemory,
+    recallHistory,
+  ].map((tool) => withDeniedCount(tool, ctx.onDenied));
 }

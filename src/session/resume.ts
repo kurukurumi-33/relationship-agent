@@ -130,15 +130,6 @@ export function injectSurveyResults(
 
 /**
  * 会话压缩：消息数超限时，保留最早一条用户消息和最近若干条。
- * 切割点必须落在 user 消息前，否则会把 assistant 和它的 toolResult 切开 —— 那正是上面要修的病。
+ * 旧的纯截断逻辑，现由 session/summary.ts 的 compactMessages 取代：
+ * 那里在同一切割规则上加了结构化摘要和原文检索提示。
  */
-export function makeContextPruner(maxMessages: number) {
-  return async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
-    if (messages.length <= maxMessages) return messages;
-    const head = messages.slice(0, 1);
-    let cut = messages.length - (maxMessages - 1);
-    while (cut < messages.length && messages[cut]?.role !== "user") cut += 1;
-    if (cut >= messages.length) return messages; // 找不到安全切割点就放弃压缩
-    return [...head, ...messages.slice(cut)];
-  };
-}

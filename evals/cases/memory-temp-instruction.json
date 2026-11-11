@@ -29,5 +29,8 @@
     "memory.itemsDelta": 0,
     "candidates.rejected": 1,
     "candidates.approved": 0
+  },
+  "expectReal": {
+    "candidates.rejected": null
   }
 }

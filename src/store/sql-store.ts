@@ -1,6 +1,7 @@
 import type { Db, Row } from "./db.js";
 import type { StorePort } from "./port.js";
 import { GenerationConflictError, NotFoundError } from "./port.js";
+import { PermissionDeniedError } from "../errors.js";
 import type {
   AppState,
   AccessLogEntry,
@@ -318,7 +319,9 @@ export class SqlStore implements StorePort {
       if (!row) throw new Error(`sourceIds 校验失败：证据 ${id} 不存在`);
       const owner = asString(row.person_id);
       if (owner !== personId) {
-        throw new Error(`sourceIds 校验失败：证据 ${id} 属于 ${owner}，不属于 ${personId}`);
+        throw new PermissionDeniedError(
+          `sourceIds 校验失败：证据 ${id} 属于 ${owner}，不属于 ${personId}`,
+        );
       }
     }
   }
