@@ -245,7 +245,6 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
     transformContext:
       maxContextMessages > 0
         ? async (msgs) => {
-            const before = msgs.length;
             const previous = parseSummary((await store.getCompaction(sessionId))?.summary);
             const compacted = await compactMessages(msgs, {
               maxMessages: maxContextMessages,
@@ -258,7 +257,7 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
                 ? addUsage(compactionUsage, compacted.usage)
                 : compacted.usage;
             }
-            if (compacted.messages.length < before) {
+            if (compacted.dropped > 0) {
               const generation = (await store.getCompaction(sessionId))?.generation ?? 0;
               try {
                 await store.recordCompaction(sessionId, generation, {

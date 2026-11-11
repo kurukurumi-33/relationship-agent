@@ -9,7 +9,7 @@ import { Outbox } from "../src/runtime/outbox.js";
 import { RunGuard, DEFAULT_BUDGET } from "../src/agent/guard.js";
 import { checkToolRules } from "../src/agent/rules.js";
 import { repairToolPairing, injectSurveyResults } from "../src/session/resume.js";
-import { compactMessages } from "../src/session/summary.js";
+import { compactMessages, type SessionSummary } from "../src/session/summary.js";
 import { buildMemorySnapshot } from "../src/agent/snapshot.js";
 import { createTools } from "../src/agent/tools.js";
 import { ingestEvidence } from "../src/ingest/evidence.js";
@@ -984,40 +984,59 @@ async function main(): Promise<void> {
       timestamp: n,
     } as unknown as AgentMessage);
   };
+  const stubSummary = (): SessionSummary => ({
+    facts: [{ text: "实验占位", evidenceIds: [] }],
+    openThreads: [],
+    coveredMessages: 0,
+    generatedAt: "2026-11-11T00:00:00.000Z",
+    windowStart: 0,
+  });
 
   const seeded: AgentMessage[] = [];
   for (let i = 0; i < 11; i += 1) pair(seeded, i);
-  const firstCompact = await compactMessages(seeded, { maxMessages: 20, lowWater: 12 });
+  const firstCompact = await compactMessages(seeded, {
+    maxMessages: 20,
+    lowWater: 12,
+    previous: stubSummary(),
+  });
   check("触发后压到低水位", firstCompact.messages.length <= 12, firstCompact.messages.length);
+  check("窗口起点记进摘要", firstCompact.summary?.windowStart === 12, firstCompact.summary?.windowStart);
 
-  let quietMsgs = firstCompact.messages;
+  // 调用方每轮传的是全量消息。压过之后即使没触发，也必须返回同一个窗口视图，
+  // 否则模型会重新看到被压掉的整段历史。
+  const full = seeded.slice();
+  let previous = firstCompact.summary;
   let quiet = 0;
-  let untouched = 0;
+  const viewLens: number[] = [];
   for (let i = 0; i < 3; i += 1) {
-    const next = quietMsgs.slice();
-    pair(next, 100 + i);
-    const r = await compactMessages(next, { maxMessages: 20, lowWater: 12 });
+    pair(full, 100 + i);
+    const r = await compactMessages(full, { maxMessages: 20, lowWater: 12, previous });
     if (r.dropped === 0) quiet += 1;
-    if (r.dropped === 0 && r.messages === next) untouched += 1;
-    quietMsgs = r.messages;
+    previous = r.summary;
+    viewLens.push(r.messages.length);
   }
   check("压缩后连续三轮不再触发", quiet === 3, quiet);
-  check("不触发时原数组原样返回", untouched === 3, untouched);
+  check(
+    "不触发时视图只追加不重置",
+    viewLens.length === 3 && viewLens[1]! - viewLens[0]! === 2 && viewLens[2]! - viewLens[1]! === 2,
+    viewLens,
+  );
 
   const simulate = async (lowWater: number) => {
-    let msgs: AgentMessage[] = [];
+    const msgs: AgentMessage[] = [];
+    let prev: SessionSummary | undefined = stubSummary();
     let compactions = 0;
-    let totalLen = 0;
+    let totalView = 0;
     let peak = 0;
     for (let turn = 0; turn < 30; turn += 1) {
       pair(msgs, turn);
-      const r = await compactMessages(msgs, { maxMessages: 20, lowWater });
+      const r = await compactMessages(msgs, { maxMessages: 20, lowWater, previous: prev });
       if (r.dropped > 0) compactions += 1;
-      msgs = r.messages;
-      totalLen += msgs.length;
-      peak = Math.max(peak, msgs.length);
+      prev = r.summary;
+      totalView += r.messages.length;
+      peak = Math.max(peak, r.messages.length);
     }
-    return { compactions, avg: totalLen / 30, peak };
+    return { compactions, avg: totalView / 30, peak };
   };
   const sliding = await simulate(20);
   const hysteretic = await simulate(12);

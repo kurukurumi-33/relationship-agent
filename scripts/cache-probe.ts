@@ -68,6 +68,7 @@ async function runPolicy(
   const history: AgentMessage[] = [];
   const stats: TurnStat[] = [];
   let compactions = 0;
+  let previous: SessionSummary = FIXED_SUMMARY;
 
   for (let t = 0; t < turns; t += 1) {
     history.push({
@@ -79,9 +80,10 @@ async function runPolicy(
     const compacted = await compactMessages(history, {
       maxMessages: high,
       lowWater,
-      previous: FIXED_SUMMARY,
+      previous,
     });
     if (compacted.dropped > 0) compactions += 1;
+    previous = compacted.summary ?? previous;
 
     const response = (await completeSimple(model, {
       systemPrompt: SYSTEM,

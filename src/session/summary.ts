@@ -21,6 +21,8 @@ export interface SessionSummary {
   openThreads: string[];
   /** 已覆盖到第几条原始消息（不含）；用来判断这次要不要重新摘要 */
   coveredMessages: number;
+  /** 保留窗口在原始消息里的起点；滞回压缩靠它判断"离上次压缩涨了多少" */
+  windowStart?: number;
   generatedAt: string;
 }
 
@@ -74,6 +76,7 @@ export function parseSummary(raw: string | undefined | null): SessionSummary | u
         ? parsed.openThreads.filter((t): t is string => typeof t === "string")
         : [],
       coveredMessages: Number(parsed.coveredMessages ?? 0),
+      windowStart: Number(parsed.windowStart ?? 0),
       generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : "",
     };
   } catch {
@@ -259,18 +262,45 @@ export async function compactMessages(
     previous?: SessionSummary;
   },
 ): Promise<CompactResult> {
-  if (messages.length <= opts.maxMessages) return { messages, dropped: 0, summary: opts.previous };
-
-  let summary = opts.previous;
   // 固定占两条：保留的第一条用户消息，以及一条摘要/截断说明
   const reserve = 2;
   const low = Math.min(
     opts.lowWater ?? Math.max(4, Math.floor(opts.maxMessages * 0.6)),
     opts.maxMessages,
   );
+  const previousStart = opts.previous?.windowStart ?? 0;
+
+  // 调用方每轮传进来的是全量消息，触发条件必须看"实际发给模型的视图"有多长。
+  const viewLength = (start: number) =>
+    start <= 0 ? messages.length : reserve + (messages.length - start);
+
+  if (viewLength(previousStart) <= opts.maxMessages) {
+    if (previousStart <= 0 || !opts.previous) {
+      return { messages, dropped: 0, summary: opts.previous };
+    }
+    // 压过但还没到下一次触发点：继续返回同一个窗口视图，不能把全量上下文放回去
+    return {
+      messages: [
+        messages[0]!,
+        summaryMessage(opts.previous, true),
+        ...messages.slice(previousStart),
+      ],
+      dropped: 0,
+      summary: opts.previous,
+    };
+  }
+
+  let summary = opts.previous;
   let cut = messages.length - Math.max(low - reserve, 1);
   while (cut < messages.length && messages[cut]?.role !== "user") cut += 1;
-  if (cut >= messages.length || cut <= 1) return { messages, dropped: 0, summary };
+  if (cut >= messages.length || cut <= 1) {
+    if (previousStart <= 0 || !summary) return { messages, dropped: 0, summary };
+    return {
+      messages: [messages[0]!, summaryMessage(summary, true), ...messages.slice(previousStart)],
+      dropped: 0,
+      summary,
+    };
+  }
 
   // 只把"还没进摘要"的那段交给模型。用 slice(1, cut) 会把整个中段反复摘一遍，
   // 会话越长越贵，还容易撞上字符预算，导致最近的掉出消息反而没被覆盖。
@@ -289,11 +319,20 @@ export async function compactMessages(
     }
   }
 
+  // 窗口起点跟着摘要一起落库：下一次调用据此判断"离上次压缩又涨了多少"
+  if (summary) summary = { ...summary, windowStart: cut };
+
   const head = messages[0]!;
   const kept = messages.slice(cut);
   const out = summary
     ? [head, summaryMessage(summary, true), ...kept]
     : [head, truncationMessage(messages.length - kept.length - 1), ...kept];
 
-  return { messages: out, dropped: messages.length - out.length, summary, usage };
+  return {
+    messages: out,
+    // 只算本次新移出窗口的条数；0 表示这次没有触发新的压缩
+    dropped: cut - Math.max(previousStart, 1),
+    summary,
+    usage,
+  };
 }
