@@ -10,6 +10,7 @@
  */
 import { readFile, stat } from "node:fs/promises";
 import { extname } from "node:path";
+import { loadEnv } from "../src/config.js";
 import { createVisionExtractor } from "../src/ingest/ocr.js";
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -27,6 +28,7 @@ function arg(name: string): string | undefined {
 }
 
 async function main(): Promise<void> {
+  loadEnv();
   const file = arg("image");
   if (!file) {
     console.log("用法: npm run ocr-check -- --image <图片路径> [--model qwen-vl-max]");

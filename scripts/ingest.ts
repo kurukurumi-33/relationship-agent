@@ -14,6 +14,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Store } from "../src/store/store.js";
+import { loadEnv } from "../src/config.js";
 import { seedState } from "../src/data/seed.js";
 import { ingestEvidence, type RawEvidenceInput } from "../src/ingest/evidence.js";
 import { ingestIcs } from "../src/ingest/calendar.js";
@@ -29,6 +30,7 @@ function arg(name: string): string | undefined {
 }
 
 async function main(): Promise<void> {
+  loadEnv();
   const file = arg("file");
   const ics = arg("ics");
   const image = arg("image");
