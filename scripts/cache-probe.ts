@@ -9,7 +9,11 @@
  *
  * 判读：滑窗每次触发后窗口整体前移，可复用前缀只剩系统提示和开头几条；
  * 滞回压缩一次压到低水位，之后几轮只在末尾追加，整段上一次请求都能命中缓存。
+ *
+ * 每次运行都带一个随机编号，并且每轮内容唯一。否则上一次运行留下的缓存会在这一次
+ * 被整段命中，测出来的是"重放了旧请求"，不是当前策略的缓存行为。
  */
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -26,11 +30,19 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-const SYSTEM = "你是前缀缓存实验的陪练。只回复“收到”两个字，不要展开。";
+const RUN_ID = randomUUID().slice(0, 8);
+const SYSTEM = `你是前缀缓存实验的陪练。只回复“收到”两个字，不要展开。本次实验编号：${RUN_ID}。`;
 
-// 单条消息就要有几百字，否则整个前缀够不到缓存的最小单元
-const FILLER =
-  "这是一段用来把前缀撑过缓存最小单元的填充文本，措辞和顺序在实验期间保持不变。".repeat(4);
+// 每轮内容唯一且不重复，避免不同位置的消息因为文本一样而互相命中
+function turnText(turn: number): string {
+  let x = ((turn + 1) * 2654435761) >>> 0;
+  const parts: string[] = [];
+  for (let i = 0; i < 24; i += 1) {
+    x = (x * 1664525 + 1013904223) >>> 0;
+    parts.push(x.toString(36));
+  }
+  return `第 ${turn + 1} 轮 [${RUN_ID}]。${parts.join("-")}`;
+}
 
 // 固定的摘要内容：避免摘要重新生成本身成为前缀变化的变量
 const FIXED_SUMMARY: SessionSummary = {
@@ -73,7 +85,7 @@ async function runPolicy(
   for (let t = 0; t < turns; t += 1) {
     history.push({
       role: "user",
-      content: `第 ${t + 1} 轮。${FILLER}`,
+      content: turnText(t),
       timestamp: Date.now(),
     } as AgentMessage);
 
@@ -126,7 +138,9 @@ async function main(): Promise<void> {
 
   loadEnv();
   const model = resolveModel();
-  console.log(`\n前缀缓存实验：${turns} 轮，高水位 ${high}，低水位 ${low}，模型 ${model.name}\n`);
+  console.log(
+    `\n前缀缓存实验（编号 ${RUN_ID}）：${turns} 轮，高水位 ${high}，低水位 ${low}，模型 ${model.name}\n`,
+  );
 
   const policies: PolicyResult[] = [];
   for (const spec of [
@@ -173,7 +187,7 @@ async function main(): Promise<void> {
   await writeFile(
     join(root, "evals", "cache-probe.json"),
     JSON.stringify(
-      { generatedAt: new Date().toISOString(), model: model.name, turns, high, low, policies },
+      { generatedAt: new Date().toISOString(), runId: RUN_ID, model: model.name, turns, high, low, policies },
       null,
       2,
     ),
