@@ -135,6 +135,9 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
       if (ev.personId !== ctx.personId) {
         throw new PermissionDeniedError(`证据 ${params.evidenceId} 不属于当前联系人，拒绝跨人读取`);
       }
+      if ((ev.status ?? "active") !== "active") {
+        throw new Error(`证据 ${params.evidenceId} 尚未通过人工确认，暂时不可读`);
+      }
       await ctx.store.logAccess({
         sessionId: ctx.sessionId,
         personId: ctx.personId,

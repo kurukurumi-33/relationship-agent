@@ -12,6 +12,7 @@
     "trace": "tsx scripts/trace.ts",
     "judge": "tsx scripts/judge.ts",
     "ingest": "tsx scripts/ingest.ts",
+    "review": "tsx scripts/review.ts",
     "eval": "tsx scripts/eval.ts",
     "eval:real": "tsx scripts/eval.ts --real",
     "probe": "tsx scripts/probe.ts",

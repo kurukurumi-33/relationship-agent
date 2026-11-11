@@ -23,6 +23,8 @@ export class PgDb implements Db {
     const pool = new Pool({ connectionString: url });
     // 建表是多语句脚本，用 pool.query 走简单查询协议
     await pool.query(SCHEMA);
+    // 旧库补列；PostgreSQL 支持 IF NOT EXISTS，重复执行安全
+    await pool.query("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'");
     return new PgDb(pool);
   }
 

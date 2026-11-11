@@ -19,6 +19,10 @@ export interface RawEvidenceInput {
   content: string;
   sourceRef: string;
   summary?: string;
+  /** 入库状态；抽取失败的材料传 pending_review */
+  status?: Evidence["status"];
+  /** 覆盖默认哈希口径，例如截图按字节哈希、解析失败的事件按原文哈希 */
+  contentHash?: string;
   /** 覆盖默认 TTL；传 0 表示永不过期 */
   ttlMs?: number;
   evidenceId?: string;
@@ -44,7 +48,7 @@ export function contentHashOf(input: Pick<RawEvidenceInput, "personId" | "kind" 
     .digest("hex");
 }
 
-function deriveSummary(content: string, limit = 60): string {
+export function deriveSummary(content: string, limit = 60): string {
   const flat = content.replace(/\s+/g, " ").trim();
   return flat.length <= limit ? flat : `${flat.slice(0, limit)}…`;
 }
@@ -54,7 +58,7 @@ export async function ingestEvidence(
   input: RawEvidenceInput,
   now: Date = new Date(),
 ): Promise<{ evidence: Evidence; created: boolean; expiresAt?: string }> {
-  const contentHash = contentHashOf(input);
+  const contentHash = input.contentHash ?? contentHashOf(input);
   const ttlMs = input.ttlMs ?? DEFAULT_TTL_MS[input.kind];
 
   // 过期时间从"材料产生的时间"算，不是从入库时间算。
@@ -72,6 +76,7 @@ export async function ingestEvidence(
     sourceRef: input.sourceRef,
     contentHash,
     expiresAt,
+    status: input.status ?? "active",
     // 摘要必须现在生成：等原文过期了再想摘就来不及了
     summary: input.summary ?? (expiresAt ? deriveSummary(input.content) : undefined),
   });

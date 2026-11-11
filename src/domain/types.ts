@@ -30,10 +30,17 @@ export interface Person {
  *   - 过期后只保留 summary + sourceRef，用于追溯"这条结论当时来自哪张图"；
  *   - 长期记忆只引用 evidenceId，不复制原文，所以原图可以放心清。
  */
+export type EvidenceStatus = "active" | "pending_review" | "rejected";
+
 export interface Evidence {
   evidenceId: EvidenceId;
   personId: PersonId;
   kind: "message" | "calendar" | "note" | "manual" | "screenshot";
+  /**
+   * 入库状态。自动抽取失败的材料落 pending_review，等人工确认后才算可用。
+   * 缺省视为 active，兼容已有数据。
+   */
+  status?: EvidenceStatus;
   capturedAt: string;
   title: string;
   content: string;

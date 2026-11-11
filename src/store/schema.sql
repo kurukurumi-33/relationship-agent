@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS evidence (
   source_ref   TEXT NOT NULL,
   content_hash TEXT,
   expires_at   TEXT,
-  summary      TEXT
+  summary      TEXT,
+  status       TEXT NOT NULL DEFAULT 'active'  -- active / pending_review
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_person ON evidence(person_id);
 -- 同一份材料只存一次：去重由数据库保证，不靠应用层先查后插

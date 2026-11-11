@@ -104,7 +104,10 @@ export class SqlStore implements StorePort {
 
   async searchEvidence(personId: PersonId, query: string): Promise<Evidence[]> {
     const q = query.trim().toLowerCase();
-    const all = await this.listEvidence(personId);
+    // 待人工确认的材料不能参与检索：抽取失败意味着正文不可信
+    const all = (await this.listEvidence(personId)).filter(
+      (e) => (e.status ?? "active") === "active",
+    );
     if (!q) return all;
     return all.filter(
       (e) =>
@@ -722,8 +725,8 @@ export class SqlStore implements StorePort {
     };
     const changed = await this.run(
       `INSERT INTO evidence (evidence_id, person_id, kind, captured_at, title, content, source_ref,
-                             content_hash, expires_at, summary)
-       VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(evidence_id) DO NOTHING`,
+                             content_hash, expires_at, summary, status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(evidence_id) DO NOTHING`,
       evidence.evidenceId,
       evidence.personId,
       evidence.kind,
@@ -734,11 +737,38 @@ export class SqlStore implements StorePort {
       evidence.contentHash ?? null,
       evidence.expiresAt ?? null,
       evidence.summary ?? null,
+      evidence.status ?? "active",
     );
     if (changed === 0) {
       return { evidence: await this.getEvidence(evidence.evidenceId), created: false };
     }
     return { evidence, created: true };
+  }
+
+  async updateEvidence(
+    evidenceId: EvidenceId,
+    patch: {
+      status?: Evidence["status"];
+      title?: string;
+      content?: string;
+      summary?: string;
+      expiresAt?: string;
+    },
+  ): Promise<Evidence> {
+    const current = await this.getEvidence(evidenceId);
+    const next = { ...current, ...patch };
+    const changed = await this.run(
+      `UPDATE evidence SET status = ?, title = ?, content = ?, summary = ?, expires_at = ?
+        WHERE evidence_id = ?`,
+      next.status ?? "active",
+      next.title,
+      next.content,
+      next.summary ?? null,
+      next.expiresAt ?? null,
+      evidenceId,
+    );
+    if (changed === 0) throw new NotFoundError(`evidence ${evidenceId}`);
+    return this.getEvidence(evidenceId);
   }
 
   // ---------- 问卷（可恢复暂停点） ----------
@@ -1204,6 +1234,7 @@ export class SqlStore implements StorePort {
       contentHash: asNullable(row.content_hash),
       expiresAt: asNullable(row.expires_at),
       summary: asNullable(row.summary),
+      status: (asNullable(row.status) as Evidence["status"]) ?? "active",
     };
   }
 

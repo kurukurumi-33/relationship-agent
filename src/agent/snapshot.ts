@@ -45,7 +45,9 @@ export async function buildMemorySnapshot(store: Store, personId: string, now: D
   const person = await store.getPerson(personId);
   const doc = await store.getMemoryDoc(personId);
 
-  const evidence = (await store.listEvidence(personId)).map((ev) => {
+  const evidence = (await store.listEvidence(personId))
+    .filter((ev) => (ev.status ?? "active") === "active")
+    .map((ev) => {
     const expired = store.isExpired(ev, now);
     return {
       evidenceId: ev.evidenceId,

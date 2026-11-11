@@ -42,6 +42,11 @@ export class SqliteDb implements Db {
     // 跨进程抢锁时最多等 5 秒，而不是立刻报 database is locked
     db.exec("PRAGMA busy_timeout = 5000");
     db.exec(SCHEMA);
+    // CREATE TABLE IF NOT EXISTS 不会给旧库补列，这里单独迁移一次
+    const columns = db.prepare("PRAGMA table_info(evidence)").all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "status")) {
+      db.exec("ALTER TABLE evidence ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+    }
     return new SqliteDb(db, path);
   }
 

@@ -133,6 +133,17 @@ export interface StorePort {
   importEvidence(
     input: Omit<Evidence, "evidenceId"> & { evidenceId?: EvidenceId },
   ): Promise<{ evidence: Evidence; created: boolean }>;
+  /** 人工审核待确认证据：改状态，必要时补正文和标题。 */
+  updateEvidence(
+    evidenceId: EvidenceId,
+    patch: {
+      status?: Evidence["status"];
+      title?: string;
+      content?: string;
+      summary?: string;
+      expiresAt?: string;
+    },
+  ): Promise<Evidence>;
   createSurvey(input: {
     sessionId: string;
     toolCallId: string;

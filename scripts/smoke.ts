@@ -1,4 +1,4 @@
-import { rm, readFile } from "node:fs/promises";
+import { rm, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
@@ -13,6 +13,8 @@ import { compactMessages, type SessionSummary } from "../src/session/summary.js"
 import { buildMemorySnapshot } from "../src/agent/snapshot.js";
 import { createTools } from "../src/agent/tools.js";
 import { ingestEvidence } from "../src/ingest/evidence.js";
+import { ingestIcs } from "../src/ingest/calendar.js";
+import { ingestScreenshot } from "../src/ingest/screenshot.js";
 import { registerFauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from "@mariozechner/pi-ai";
 import { runSession } from "../src/session/run.js";
 import { reconcile } from "../src/runtime/reconcile.js";
@@ -1046,6 +1048,206 @@ async function main(): Promise<void> {
   });
   check("滞回平均上下文更短", hysteretic.avg < sliding.avg, { hysteretic, sliding });
   check("滞回峰值不超过高水位", hysteretic.peak <= 20, hysteretic.peak);
+
+  // ---------- 21. 证据入库：ICS 解析、去重、待人工确认 ----------
+  console.log("\n[21] 证据入库：ICS 解析、去重、待人工确认");
+  const ingestState = join(root, "data", "smoke-ingest.db");
+  await Store.reset(ingestState);
+  const ingestStore = await Store.open(ingestState);
+  await ingestStore.seedIfEmpty(seedState);
+  const ingestNow = new Date("2026-11-11T00:00:00.000Z");
+  const icsSource = "data/inbox/calendar.ics";
+  const icsText = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "X-WR-TIMEZONE:Asia/Shanghai",
+    "BEGIN:VEVENT",
+    "UID:evt-1",
+    "SUMMARY:和张三吃饭",
+    "DTSTART;TZID=Asia/Shanghai:20261120T190000",
+    "DTEND;TZID=Asia/Shanghai:20261120T203000",
+    "LOCATION:北院区食堂",
+    "DESCRIPTION:记得带\\, 礼物",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:evt-2",
+    "SUMMARY:折行",
+    " 评审",
+    "DTSTART:20261121T010000Z",
+    "DESCRIPTION:第一行\\n第二",
+    " 行",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:evt-bad",
+    "SUMMARY:坏事件",
+    "DTSTART:明天下午",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:evt-cancel",
+    "SUMMARY:取消的会议",
+    "DTSTART:20261122T100000Z",
+    "STATUS:CANCELLED",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+
+  const calendar = await ingestIcs(ingestStore, icsText, {
+    personId: "p_001",
+    sourceRef: icsSource,
+    now: ingestNow,
+  });
+  check("读出全部 VEVENT", calendar.events.length === 4, calendar.events.length);
+  check("取消的事件被跳过", calendar.cancelled === 1, calendar.cancelled);
+  check("解析失败的事件落待确认", calendar.pending === 1, calendar.pending);
+  check("只导入三个有效事件", calendar.items.length === 3, calendar.items.length);
+
+  const dinner = calendar.items.find((i) => i.evidence.title === "和张三吃饭")!;
+  const review = calendar.items.find((i) => i.evidence.title === "折行评审")!;
+  const broken = calendar.items.find((i) => i.evidence.title === "坏事件")!;
+  check(
+    "TZID 时间换算成 UTC",
+    dinner.evidence.capturedAt === "2026-11-20T11:00:00.000Z",
+    dinner.evidence.capturedAt,
+  );
+  check("UTC 时间原样保留", review.evidence.capturedAt === "2026-11-21T01:00:00.000Z");
+  check("折行被拼回一行", review.evidence.title === "折行评审", review.evidence.title);
+  check(
+    "逗号转义被还原",
+    dinner.evidence.content.includes("说明：记得带, 礼物"),
+    dinner.evidence.content,
+  );
+  check(
+    "换行转义与折行同时还原",
+    review.evidence.content.includes("说明：第一行\n第二行"),
+    review.evidence.content,
+  );
+  check("正常事件是 active", dinner.evidence.status === "active", dinner.evidence.status);
+  check(
+    "坏事件是 pending_review 且带原因",
+    broken.evidence.status === "pending_review" &&
+      (broken.evidence.summary ?? "").includes("无法解析 DTSTART"),
+    broken.evidence.summary,
+  );
+
+  const countAfterFirst = (await ingestStore.listEvidence("p_001")).length;
+  const again = await ingestIcs(ingestStore, icsText, {
+    personId: "p_001",
+    sourceRef: icsSource,
+    now: ingestNow,
+  });
+  const countAfterSecond = (await ingestStore.listEvidence("p_001")).length;
+  check("重复导入全部命中哈希", again.items.every((i) => !i.created), again.duplicates);
+  check("重复导入不新增证据", countAfterSecond === countAfterFirst, {
+    countAfterFirst,
+    countAfterSecond,
+  });
+
+  const ingestSnapshot = await buildMemorySnapshot(ingestStore, "p_001", ingestNow);
+  check(
+    "正常日历进入快照",
+    ingestSnapshot.evidence.some((e) => e.evidenceId === dinner.evidence.evidenceId),
+  );
+  check(
+    "待确认日历不进入快照",
+    !ingestSnapshot.evidence.some((e) => e.evidenceId === broken.evidence.evidenceId),
+  );
+  check("待确认证据不参与检索", (await ingestStore.searchEvidence("p_001", "坏事件")).length === 0);
+  check("正常证据仍可检索", (await ingestStore.searchEvidence("p_001", "张三吃饭")).length === 1);
+
+  const ingestTools = createTools({
+    store: ingestStore,
+    personId: "p_001",
+    sessionId: "sess_ingest",
+    survey: async () => ({}),
+    onProposedAction: () => {},
+    onProposedMemory: () => {},
+  });
+  const getEvidenceTool = ingestTools.find((t) => t.name === "get_evidence_text") as unknown as {
+    execute: (id: string, params: { evidenceId: string }) => Promise<unknown>;
+  };
+  let pendingError = "";
+  try {
+    await getEvidenceTool.execute("c1", { evidenceId: broken.evidence.evidenceId });
+  } catch (err) {
+    pendingError = err instanceof Error ? err.message : String(err);
+  }
+  check("待确认证据对模型不可读", pendingError.includes("尚未通过人工确认"), pendingError);
+
+  const pendingShotPath = join(root, "data", "smoke-shot.png");
+  await writeFile(pendingShotPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]));
+  const pendingShot = await ingestScreenshot(ingestStore, {
+    personId: "p_001",
+    filePath: pendingShotPath,
+    now: ingestNow,
+  });
+  check(
+    "没有 OCR 时截图落待确认",
+    pendingShot.status === "pending_review" && pendingShot.evidence.status === "pending_review",
+    pendingShot.status,
+  );
+  check("失败原因写进摘要", pendingShot.evidence.summary === "未配置 OCR 提取器", pendingShot.evidence.summary);
+  const pendingShotAgain = await ingestScreenshot(ingestStore, {
+    personId: "p_001",
+    filePath: pendingShotPath,
+    now: ingestNow,
+  });
+  check(
+    "同一张图重复导入不新增",
+    pendingShotAgain.created === false &&
+      pendingShotAgain.evidence.evidenceId === pendingShot.evidence.evidenceId,
+  );
+
+  const okShotPath = join(root, "data", "smoke-shot-ok.png");
+  await writeFile(okShotPath, Buffer.from([9, 9, 9, 9, 9, 9]));
+  const okShot = await ingestScreenshot(ingestStore, {
+    personId: "p_001",
+    filePath: okShotPath,
+    now: ingestNow,
+    extractor: {
+      extract: async () => ({
+        capturedAt: "2026-11-01T08:00:00.000Z",
+        title: "聊天截图：周末安排",
+        content: "张三：周六一起吃饭",
+      }),
+    },
+  });
+  check("OCR 成功落 active", okShot.status === "active" && okShot.evidence.status === "active");
+  check("OCR 正文入库", okShot.evidence.content.includes("周六一起吃饭"));
+  const afterShotSnapshot = await buildMemorySnapshot(ingestStore, "p_001", ingestNow);
+  check(
+    "成功截图进入快照",
+    afterShotSnapshot.evidence.some((e) => e.evidenceId === okShot.evidence.evidenceId),
+  );
+  check(
+    "待确认截图不进入快照",
+    !afterShotSnapshot.evidence.some((e) => e.evidenceId === pendingShot.evidence.evidenceId),
+  );
+
+  const acceptedShot = await ingestStore.updateEvidence(pendingShot.evidence.evidenceId, {
+    status: "active",
+    content: "人工补录：张三说周六见",
+    summary: "人工补录：张三说周六见",
+  });
+  check("人工接受后状态变 active", acceptedShot.status === "active", acceptedShot.status);
+  const acceptedSnapshot = await buildMemorySnapshot(ingestStore, "p_001", ingestNow);
+  check(
+    "人工接受后进入快照",
+    acceptedSnapshot.evidence.some((e) => e.evidenceId === acceptedShot.evidenceId),
+  );
+
+  const rejectedCalendar = await ingestStore.updateEvidence(broken.evidence.evidenceId, {
+    status: "rejected",
+  });
+  check("人工拒绝后状态变 rejected", rejectedCalendar.status === "rejected", rejectedCalendar.status);
+  const rejectedSnapshot = await buildMemorySnapshot(ingestStore, "p_001", ingestNow);
+  check(
+    "拒绝的证据不进入快照",
+    !rejectedSnapshot.evidence.some((e) => e.evidenceId === rejectedCalendar.evidenceId),
+  );
+
+  await ingestStore.close();
+  await rm(pendingShotPath, { force: true });
+  await rm(okShotPath, { force: true });
 
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;

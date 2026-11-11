@@ -49,6 +49,8 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 
 ## M3 证据入库：让证据是真的
 
+**状态：确定性部分已完成（2026-11-11）** — ICS 解析、内容哈希去重、`pending_review` 与审核 CLI 已落地；截图 OCR 等待多模态 key。
+
 **目标**：现在证据是手写文本。这一阶段把"聊天截图 / 日历"变成入库管线。
 
 **技术栈**
@@ -74,6 +76,22 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 3. 抽不出的图进入 `pending_review` 状态，不进入快照
 
 **预估**：3~4 天
+
+**已完成（2026-11-11）：确定性部分**
+
+- `src/ingest/calendar.ts`：ICS 解析。处理折行、`\,` `\;` `\\` `\n` 转义、`DTSTART` / `DTEND` / `DURATION`、UTC（`Z`）、`TZID` 本地时间、浮动时间、全天日期。时区换算只依赖 Node 内置 `Intl`：先假设墙钟是 UTC，再按目标时区反算偏移，算两遍收敛，不引第三方库。
+- `src/ingest/screenshot.ts`：图片按字节哈希去重，解析器通过 `ScreenshotExtractor` 注入。没配提取器、格式不支持、提取器抛错、提取结果为空，四种情况都落 `pending_review`，原因写进 `summary`。
+- `Evidence` 新增 `status`（`active` / `pending_review`）。快照、`search_evidence`、`get_evidence_text` 三处都过滤待确认材料；`listEvidence` 仍然返回全部，供人工审核和审计使用。
+- SQLite 用 `PRAGMA table_info` 检查后 `ALTER TABLE` 补列，PostgreSQL 用 `ADD COLUMN IF NOT EXISTS`；旧库打开时自动迁移。
+- 去重键：日历用 `UID + 原始事件块`，不用解析后的时间，避免解析器时区行为变化造成重复入库；截图用图片字节的 sha256，与文件名和导入时间无关。
+- CLI 新增 `--ics` 和 `--image`，都要求 `--person`；重复导入会显示"重复跳过"。
+- 新增 `npm run review`：无参数列出待确认材料；`--accept <id> [--content "正文"] [--title "标题"]` 转成 `active`，没有正文时拒绝接受；`--reject <id>` 转成 `rejected`。空正文的截图必须先补 OCR 结果才能接受。接受后按材料类型重新计算保留期（截图 24h、日历 90d），因为确认之前不能把原文清掉。
+- smoke 新增第 21 段 29 项，共 142 项，覆盖时区换算、折行、转义、取消事件、解析失败、重复导入、快照/检索/工具三层过滤、截图失败与成功两条路径、人工接受与拒绝。
+
+**还没做的**
+
+- 截图 OCR 需要多模态 key（qwen-vl / deepseek-vl）。当前只落了失败路径和注入接口，成功路径用假提取器在 smoke 里验证。
+- `RRULE` 不展开，只导入首个实例；重复事件会在正文里标注。
 
 ---
 
