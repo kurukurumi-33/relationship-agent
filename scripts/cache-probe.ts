@@ -59,6 +59,7 @@ interface TurnStat {
   input: number;
   cacheRead: number;
   output: number;
+  cost: number;
 }
 
 interface PolicyResult {
@@ -67,6 +68,7 @@ interface PolicyResult {
   compactions: number;
   input: number;
   cacheRead: number;
+  cost: number;
   turns: TurnStat[];
 }
 
@@ -100,7 +102,17 @@ async function runPolicy(
     const response = (await completeSimple(model, {
       systemPrompt: SYSTEM,
       messages: compacted.messages,
-    })) as unknown as AgentMessage & { errorMessage?: string; usage?: Record<string, number> };
+    })) as unknown as AgentMessage & {
+      errorMessage?: string;
+      usage?: {
+        input?: number;
+        output?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+        totalTokens?: number;
+        cost?: { total?: number };
+      };
+    };
 
     if (response.errorMessage) throw new Error(`${label} 策略模型调用失败：${response.errorMessage}`);
 
@@ -112,6 +124,7 @@ async function runPolicy(
       input: usage.input ?? 0,
       cacheRead: usage.cacheRead ?? 0,
       output: usage.output ?? 0,
+      cost: usage.cost?.total ?? 0,
     });
     history.push(response);
   }
@@ -122,6 +135,7 @@ async function runPolicy(
     compactions,
     input: stats.reduce((s, x) => s + x.input, 0),
     cacheRead: stats.reduce((s, x) => s + x.cacheRead, 0),
+    cost: stats.reduce((s, x) => s + x.cost, 0),
     turns: stats,
   };
 }
@@ -164,13 +178,15 @@ async function main(): Promise<void> {
   }
 
   console.log("\n汇总");
-  console.log("  策略  压缩次数  prompt tokens  cacheRead  命中率");
+  console.log("  策略  压缩次数  prompt tokens  cacheRead  命中率  未命中 input  成本(元)");
   for (const p of policies) {
     const prompt = p.input + p.cacheRead;
     console.log(
       `  ${p.label}  ${String(p.compactions).padStart(6)}  ${String(prompt).padStart(13)}  ${String(
         p.cacheRead,
-      ).padStart(9)}  ${pct(p.cacheRead, prompt)}`,
+      ).padStart(9)}  ${pct(p.cacheRead, prompt).padStart(7)}  ${String(p.input).padStart(12)}  ${p.cost
+        .toFixed(4)
+        .padStart(8)}`,
     );
   }
 
@@ -178,9 +194,16 @@ async function main(): Promise<void> {
   const hysteretic = policies[1]!;
   const slidingPrompt = sliding.input + sliding.cacheRead;
   const hystereticPrompt = hysteretic.input + hysteretic.cacheRead;
+  const costDrop =
+    sliding.cost > 0 ? ((1 - hysteretic.cost / sliding.cost) * 100).toFixed(1) : "0.0";
   console.log(
-    `\n滞回相比滑窗：压缩 ${sliding.compactions} → ${hysteretic.compactions} 次，prompt tokens ${slidingPrompt} → ${hystereticPrompt}，` +
-      `命中率 ${pct(sliding.cacheRead, slidingPrompt)} → ${pct(hysteretic.cacheRead, hystereticPrompt)}`,
+    `\n滞回相比滑窗：压缩 ${sliding.compactions} → ${hysteretic.compactions} 次，` +
+      `prompt tokens ${slidingPrompt} → ${hystereticPrompt}，` +
+      `未命中 input ${sliding.input} → ${hysteretic.input}（${
+        sliding.input > 0 ? ((1 - hysteretic.input / sliding.input) * 100).toFixed(1) : "0.0"
+      }%），` +
+      `命中率 ${pct(sliding.cacheRead, slidingPrompt)} → ${pct(hysteretic.cacheRead, hystereticPrompt)}，` +
+      `成本 ${sliding.cost.toFixed(4)} → ${hysteretic.cost.toFixed(4)} 元（-${costDrop}%）`,
   );
 
   await mkdir(join(root, "evals"), { recursive: true });
