@@ -12,7 +12,7 @@ import { checkToolRules } from "../agent/rules.js";
 import type { ConfirmHandler, ReviewHandler } from "../runtime/survey.js";
 import type { Outbox } from "../runtime/outbox.js";
 import { repairToolPairing } from "./resume.js";
-import { compactMessages, parseSummary } from "./summary.js";
+import { compactMessages, parseSummary, type SummaryUsage } from "./summary.js";
 import { runInsight, type InsightOptions } from "../agent/insight.js";
 
 export interface RunSessionOptions {
@@ -75,7 +75,7 @@ export interface RunResult {
     conflicts: number;
     stats: { turns: number; toolCalls: number; blocked: number };
   };
-  /** 本次会话的模型用量（来自 assistant 消息上的 usage） */
+  /** 本次会话的模型用量（主循环 + 压缩摘要） */
   usage: SessionUsage;
   /** 需要人工接管的原因（护栏中断、设备失败等） */
   handoffs: string[];
@@ -218,6 +218,8 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
   });
 
   const maxContextMessages = opts.maxContextMessages ?? 0;
+  // 摘要调用不经过 agent.state.messages，用量单独累计，最后并进 RunResult.usage
+  let compactionUsage: SummaryUsage | undefined;
 
   agent = new Agent({
     initialState: {
@@ -251,6 +253,11 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
               minNewMessages: opts.summarizeContext?.minNewMessages,
               previous,
             });
+            if (compacted.usage) {
+              compactionUsage = compactionUsage
+                ? addUsage(compactionUsage, compacted.usage)
+                : compacted.usage;
+            }
             if (compacted.messages.length < before) {
               const generation = (await store.getCompaction(sessionId))?.generation ?? 0;
               try {
@@ -419,6 +426,7 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
     candidates.map((c) => store.getCandidate(c.candidateId)),
   );
 
+  const usage = sumUsage(agent.state.messages);
   return {
     sessionId,
     text: lastAssistantText(agent.state.messages),
@@ -431,8 +439,19 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
     repairedOnResume,
     replayed: false,
     insight: insightSummary,
-    usage: sumUsage(agent.state.messages),
+    usage: compactionUsage ? addUsage(usage, compactionUsage) : usage,
     handoffs: handoffReasons,
+  };
+}
+
+function addUsage(a: SessionUsage, b: SessionUsage): SessionUsage {
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+    totalTokens: a.totalTokens + b.totalTokens,
+    cost: a.cost + b.cost,
   };
 }
 

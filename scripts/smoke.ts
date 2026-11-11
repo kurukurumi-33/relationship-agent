@@ -11,6 +11,7 @@ import { checkToolRules } from "../src/agent/rules.js";
 import { repairToolPairing, injectSurveyResults } from "../src/session/resume.js";
 import { compactMessages } from "../src/session/summary.js";
 import { buildMemorySnapshot } from "../src/agent/snapshot.js";
+import { createTools } from "../src/agent/tools.js";
 import { ingestEvidence } from "../src/ingest/evidence.js";
 import { registerFauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from "@mariozechner/pi-ai";
 import { runSession } from "../src/session/run.js";
@@ -924,6 +925,49 @@ async function main(): Promise<void> {
   check("两次越界都回灌了 isError 给模型", deniedErrors.length === 2, deniedErrors.length);
   check("两次被拒后没有产生行动卡", (await deniedStore.listActions("p_001")).length === 0);
   await deniedStore.close();
+
+  // 19. 会话存档检索：多关键词不能被最早命中吃光额度
+  console.log("\n[19] recall_history：多关键词按词轮询");
+  const recallState = join(root, "data", "smoke-recall.db");
+  await Store.reset(recallState);
+  const recallStore = await Store.open(recallState);
+  await recallStore.seedIfEmpty(seedState);
+  const recallMessages = Array.from({ length: 10 }, (_, i) => ({
+    role: "user",
+    content: `第 ${i} 条：token${i}`,
+    timestamp: i,
+  })) as unknown as AgentMessage[];
+  const nowIso = new Date().toISOString();
+  await recallStore.saveSession({
+    sessionId: "sess_recall",
+    personId: "p_001",
+    messages: recallMessages,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  });
+  const recallTool = createTools({
+    store: recallStore,
+    personId: "p_001",
+    sessionId: "sess_recall",
+    survey: async () => ({}),
+    onProposedAction: () => {},
+    onProposedMemory: () => {},
+  }).find((t) => t.name === "recall_history") as unknown as {
+    execute: (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>;
+  };
+  const recallOut = await recallTool.execute("c1", {
+    query: Array.from({ length: 10 }, (_, i) => `token${i}`).join(" "),
+  });
+  const recallPayload = JSON.parse(recallOut.content[0]!.text) as {
+    returned: number;
+    truncated: boolean;
+    hits: Array<{ matched: string[] }>;
+  };
+  const distinct = new Set(recallPayload.hits.flatMap((h) => h.matched));
+  check("多关键词默认返回 8 条", recallPayload.returned === 8, recallPayload.returned);
+  check("返回条数不够时明确告知模型", recallPayload.truncated === true);
+  check("8 条覆盖 8 个不同关键词", distinct.size === 8, distinct.size);
+  await recallStore.close();
 
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;

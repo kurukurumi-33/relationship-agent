@@ -353,7 +353,7 @@ async function main(): Promise<void> {
   console.log(
     `\n摘要带来的增量：B ${b.recall}/10 → C ${c.recall}/10（${c.recall - b.recall >= 0 ? "+" : ""}${c.recall - b.recall}）`,
   );
-  console.log("注：C 臂生成摘要的那次模型调用不经过主 Agent，未计入上表 tokens 和成本。");
+  console.log("注：C 臂生成摘要的那次模型调用已计入上表 tokens 和成本。");
 
   await mkdir(join(root, "evals"), { recursive: true });
   await writeFile(

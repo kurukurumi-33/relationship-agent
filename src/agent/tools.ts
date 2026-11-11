@@ -86,8 +86,12 @@ const ProposeMemoryParams = Type.Object({
 });
 
 const RecallParams = Type.Object({
-  query: Type.String({ description: "要回忆的线索关键词，多个词用空格分隔，例如 复查 医院" }),
-  limit: Type.Optional(Type.Number({ description: "最多返回几条，默认 3，上限 8" })),
+  query: Type.String({
+    description: "要回忆的线索关键词，多个词用空格分隔，例如 复查 医院；多关键词时会为每个词各取一条",
+  }),
+  limit: Type.Optional(
+    Type.Number({ description: "最多返回几条；单关键词默认 3，多关键词按词数增加，上限 8" }),
+  ),
 });
 
 /** 从一条消息里抽纯文本：工具结果也参与检索，否则"我上次让你查的东西"就断了。 */
@@ -282,7 +286,11 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
       const session = await ctx.store.getSession(ctx.sessionId);
       if (!session) throw new Error("会话存档不存在，无法检索");
       const messages = session.messages as unknown[];
-      const limit = Math.min(Math.max(params.limit ?? 3, 1), 8);
+      // 多关键词查询最容易死在"最早几条把额度吃光"：十个词一起问，后面的词一条都看不到。
+      // 所以有多个词时默认额度按词数放大，下面再保证每个词至少占一个位置。
+      const maxReturn = 8;
+      const defaultLimit = keywords.length > 1 ? Math.min(keywords.length, maxReturn) : 3;
+      const limit = Math.min(Math.max(params.limit ?? defaultLimit, 1), maxReturn);
 
       const hits: Array<{ index: number; role: string; excerpt: string; matched: string[] }> = [];
       for (let i = 0; i < messages.length; i += 1) {
@@ -298,18 +306,40 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
         });
       }
 
-      // 取最早的命中：近处的内容本来就在上下文里，存档的价值在远处
-      const top = hits.slice(0, limit);
+      const picked: typeof hits = [];
+      const seen = new Set<number>();
+      // 第一轮：每个关键词各拿一条最早命中
+      for (const keyword of keywords) {
+        if (picked.length >= limit) break;
+        const hit = hits.find((h) => h.matched.includes(keyword) && !seen.has(h.index));
+        if (!hit) continue;
+        picked.push(hit);
+        seen.add(hit.index);
+      }
+      // 第二轮：还有额度就按时间顺序补
+      for (const hit of hits) {
+        if (picked.length >= limit) break;
+        if (seen.has(hit.index)) continue;
+        picked.push(hit);
+        seen.add(hit.index);
+      }
+      picked.sort((a, b) => a.index - b.index);
+      const missing = hits.length - picked.length;
+
       return {
         content: text({
           totalMatches: hits.length,
-          hits: top,
+          returned: picked.length,
+          truncated: missing > 0,
+          hits: picked,
           note:
-            top.length === 0
+            picked.length === 0
               ? "存档里没有匹配的内容。不要据此编造，直接说明没找到。"
-              : "这些是对话原文片段，引用时说明出自哪一轮。",
+              : missing > 0
+                ? `共匹配 ${hits.length} 条，本次只返回 ${picked.length} 条。要更多就换更具体的关键词，或把 limit 调大（上限 8）。引用时说明出自哪一轮。`
+                : "这些是对话原文片段，引用时说明出自哪一轮。",
         }),
-        details: { totalMatches: hits.length, returned: top.length },
+        details: { totalMatches: hits.length, returned: picked.length, truncated: missing > 0 },
       };
     },
   };

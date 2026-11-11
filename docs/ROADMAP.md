@@ -160,6 +160,15 @@ npm run probe -- --rounds 80 --max-context 16
 
 判读和局限写在 `docs/EVAL.md`：每题只跑一次，只能看方向，不能拿单次结果当召回率。
 
+**同一天修掉的四处实现问题**
+
+1. 重新摘要原来每次都用 `slice(1, cut)`，把整个中段反复摘一遍。改成从 `coveredMessages` 摘到 `cut`，只处理新增掉出的那段，费用随会话长度线性增长的问题消失。
+2. 摘要输入有 12k 字符预算，超了会静默截断，但 `coveredMessages` 仍按全覆盖记账。现在 `renderTranscript` 回报实际吃掉的条数，覆盖位置按真实进度推进，剩下的下一次接着摘。
+3. `recall_history` 的多关键词查询按最早命中截断，前几个词占满额度。现在按词轮询，每个词至少占一个位置，返回条数随词数放大到上限 8，有未返回的匹配时明确告诉模型。
+4. 摘要调用的 tokens 和成本原来不进 `RunResult.usage`。现在单独累计后并入，探针 C 臂的数字包含摘要开销。
+
+smoke 新增第 19 段验证多关键词轮询，共 104 项；typecheck、eval 8/8、audit 15/15 全绿。
+
 **故障注入压测（2026-11-10）**
 
 `src/runtime/faults.ts` + `scripts/soak.ts`。故障打在设备适配器外面，不改 Outbox，

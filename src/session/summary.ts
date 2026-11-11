@@ -28,6 +28,26 @@ export interface CompactResult {
   messages: AgentMessage[];
   dropped: number;
   summary?: SessionSummary;
+  /** 本次压缩里生成摘要消耗的用量；没调模型就是 undefined */
+  usage?: SummaryUsage;
+}
+
+/** 与主循环的 SessionUsage 字段一致；单独定义是为了不反向依赖 run.ts。 */
+export interface SummaryUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  cost: number;
+}
+
+export interface SummarizeResult {
+  /** 解析失败时没有 summary，但模型调用可能已经花钱了，所以 usage 要单独带回来 */
+  summary?: SessionSummary;
+  /** 真正喂进摘要器的消息条数（含中途跳过的空消息） */
+  consumed: number;
+  usage?: SummaryUsage;
 }
 
 /** 事实条数上限：摘要本身也会膨胀，超过这个数就不是摘要了 */
@@ -74,21 +94,32 @@ function textOf(message: AgentMessage): string {
     .join("\n");
 }
 
-function renderTranscript(messages: AgentMessage[]): string {
+/**
+ * 渲染给摘要器的对话文本，同时回报吃掉了多少条消息。
+ *
+ * 字符预算用完就停，但调用方必须知道停在哪，否则 coveredMessages 会虚报覆盖范围，
+ * 后面的消息既没进摘要，也没人再去处理。
+ */
+function renderTranscript(messages: AgentMessage[]): { text: string; consumed: number } {
   const lines: string[] = [];
   let budget = MAX_TRANSCRIPT_CHARS;
-  for (const message of messages) {
-    const body = textOf(message).trim();
-    if (!body) continue;
+  let consumed = 0;
+  for (let i = 0; i < messages.length; i += 1) {
+    const body = textOf(messages[i]!).trim();
+    if (!body) {
+      consumed = i + 1;
+      continue;
+    }
     const who =
-      message.role === "user" ? "用户" : message.role === "assistant" ? "助手" : "工具结果";
+      messages[i]!.role === "user" ? "用户" : messages[i]!.role === "assistant" ? "助手" : "工具结果";
     const clipped = body.length > MAX_MESSAGE_CHARS ? `${body.slice(0, MAX_MESSAGE_CHARS)}…` : body;
     const line = `${who}：${clipped}`;
     if (line.length > budget) break;
     budget -= line.length;
     lines.push(line);
+    consumed = i + 1;
   }
-  return lines.join("\n");
+  return { text: lines.join("\n"), consumed };
 }
 
 const SUMMARY_SYSTEM_PROMPT = [
@@ -98,7 +129,7 @@ const SUMMARY_SYSTEM_PROMPT = [
   "只输出一个 JSON 对象，不要代码块以外的任何文字。",
 ].join("\n");
 
-function buildSummaryPrompt(previous: SessionSummary | undefined, messages: AgentMessage[]): string {
+function buildSummaryPrompt(previous: SessionSummary | undefined, transcript: string): string {
   const parts: string[] = [];
   if (previous && previous.facts.length > 0) {
     parts.push(
@@ -108,7 +139,7 @@ function buildSummaryPrompt(previous: SessionSummary | undefined, messages: Agen
   }
   parts.push(
     "新增对话片段：",
-    renderTranscript(messages) || "（空）",
+    transcript || "（空）",
     "",
     "输出格式：",
     '{"facts":[{"text":"一句话事实","evidenceIds":["ev_001"]}],"openThreads":["尚未解决、后续还要跟进的事"]}',
@@ -122,26 +153,63 @@ function buildSummaryPrompt(previous: SessionSummary | undefined, messages: Agen
   return parts.join("\n");
 }
 
+type RawUsage = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  totalTokens?: number;
+  cost?: { total?: number };
+};
+
+function usageOf(response: unknown): SummaryUsage | undefined {
+  const usage = (response as { usage?: RawUsage }).usage;
+  if (!usage) return undefined;
+  return {
+    input: usage.input ?? 0,
+    output: usage.output ?? 0,
+    cacheRead: usage.cacheRead ?? 0,
+    cacheWrite: usage.cacheWrite ?? 0,
+    totalTokens: usage.totalTokens ?? 0,
+    cost: usage.cost?.total ?? 0,
+  };
+}
+
 /**
- * 生成新摘要。模型调用或解析失败都返回 undefined，让上层退回"只截断"，
+ * 生成新摘要。模型调用或解析失败都不抛错，让上层退回旧摘要或只截断，
  * 因为压缩失败不该把整轮对话弄挂。
+ *
+ * consumed 是实际喂进摘要器的消息条数：字符预算用完时会小于传入长度，
+ * 调用方据此推进 coveredMessages，下次从这里接着摘，避免重复处理整个中段。
  */
 export async function summarizeDropped(
   model: Model<any>,
   previous: SessionSummary | undefined,
   messages: AgentMessage[],
-): Promise<SessionSummary | undefined> {
-  if (messages.length === 0) return previous;
+): Promise<SummarizeResult | undefined> {
+  if (messages.length === 0) return previous ? { summary: previous, consumed: 0 } : undefined;
   try {
+    const rendered = renderTranscript(messages);
     const response = await completeSimple(model, {
       systemPrompt: SUMMARY_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: buildSummaryPrompt(previous, messages), timestamp: Date.now() }],
+      messages: [
+        {
+          role: "user",
+          content: buildSummaryPrompt(previous, rendered.text),
+          timestamp: Date.now(),
+        },
+      ],
     });
+    const usage = usageOf(response);
     const raw = textOf(response as unknown as AgentMessage);
     const json = raw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const parsed = parseSummary(json);
-    if (!parsed) return undefined;
-    return { ...parsed, coveredMessages: 0, generatedAt: new Date().toISOString() };
+    if (!parsed) return { consumed: 0, usage };
+    return {
+      summary: { ...parsed, coveredMessages: 0, generatedAt: new Date().toISOString() },
+      consumed: rendered.consumed,
+      usage,
+    };
   } catch {
     return undefined;
   }
@@ -193,15 +261,20 @@ export async function compactMessages(
   while (cut < messages.length && messages[cut]?.role !== "user") cut += 1;
   if (cut >= messages.length || cut <= 1) return { messages, dropped: 0, summary };
 
-  const newlyDropped = messages.slice(1, cut);
-  if (opts.model) {
-    const covered = summary?.coveredMessages ?? 1;
-    const fresh = cut - covered;
-    const threshold = opts.minNewMessages ?? 8;
-    if (fresh > 0 && (fresh >= threshold || !summary)) {
-      const next = await summarizeDropped(opts.model, summary, newlyDropped);
-      // 失败就沿用旧摘要：宁可少覆盖一点，也不要因为一次 400 把压缩记录写坏
-      if (next) summary = { ...next, coveredMessages: cut };
+  // 只把"还没进摘要"的那段交给模型。用 slice(1, cut) 会把整个中段反复摘一遍，
+  // 会话越长越贵，还容易撞上字符预算，导致最近的掉出消息反而没被覆盖。
+  const start = Math.max(summary?.coveredMessages ?? 1, 1);
+  const fresh = cut - start;
+  const threshold = opts.minNewMessages ?? 8;
+  let usage: SummaryUsage | undefined;
+  if (opts.model && fresh > 0 && (fresh >= threshold || !summary)) {
+    const result = await summarizeDropped(opts.model, summary, messages.slice(start, cut));
+    if (result) {
+      usage = result.usage;
+      // 解析失败时 consumed 为 0，coveredMessages 不前进，下次会重试这一段
+      if (result.summary) {
+        summary = { ...result.summary, coveredMessages: start + result.consumed };
+      }
     }
   }
 
@@ -211,5 +284,5 @@ export async function compactMessages(
     ? [head, summaryMessage(summary, true), ...kept]
     : [head, truncationMessage(messages.length - kept.length - 1), ...kept];
 
-  return { messages: out, dropped: messages.length - out.length, summary };
+  return { messages: out, dropped: messages.length - out.length, summary, usage };
 }
