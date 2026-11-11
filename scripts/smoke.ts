@@ -15,6 +15,7 @@ import { createTools } from "../src/agent/tools.js";
 import { ingestEvidence } from "../src/ingest/evidence.js";
 import { ingestIcs } from "../src/ingest/calendar.js";
 import { ingestScreenshot } from "../src/ingest/screenshot.js";
+import { parseOcrJson, createVisionExtractor } from "../src/ingest/ocr.js";
 import { registerFauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from "@mariozechner/pi-ai";
 import { runSession } from "../src/session/run.js";
 import { reconcile } from "../src/runtime/reconcile.js";
@@ -1197,6 +1198,27 @@ async function main(): Promise<void> {
       pendingShotAgain.evidence.evidenceId === pendingShot.evidence.evidenceId,
   );
 
+  // 空白 key 让 resolveApiKey 直接抛错，不会真的打到网络
+  const noKeyShotPath = join(root, "data", "smoke-shot-nokey.png");
+  await writeFile(noKeyShotPath, Buffer.from([7, 7, 7, 7]));
+  const noKeyShot = await ingestScreenshot(ingestStore, {
+    personId: "p_001",
+    filePath: noKeyShotPath,
+    now: ingestNow,
+    extractor: createVisionExtractor({ apiKey: "  " }),
+  });
+  check("缺 OCR key 的截图落待确认", noKeyShot.status === "pending_review", noKeyShot.status);
+  check(
+    "缺 key 的原因能被人工看到",
+    (noKeyShot.reason ?? "").includes("缺少 OCR API key"),
+    noKeyShot.reason,
+  );
+  check(
+    "缺 key 时不写正文",
+    noKeyShot.evidence.content === "" && noKeyShot.evidence.status === "pending_review",
+  );
+  await rm(noKeyShotPath, { force: true });
+
   const okShotPath = join(root, "data", "smoke-shot-ok.png");
   await writeFile(okShotPath, Buffer.from([9, 9, 9, 9, 9, 9]));
   const okShot = await ingestScreenshot(ingestStore, {
@@ -1248,6 +1270,79 @@ async function main(): Promise<void> {
   await ingestStore.close();
   await rm(pendingShotPath, { force: true });
   await rm(okShotPath, { force: true });
+
+  // ---------- 22. 截图 OCR：回复解析与配置守卫 ----------
+  console.log("\n[22] 截图 OCR：回复解析与配置守卫");
+  const ocrParsed = parseOcrJson(
+    '{"capturedAt":"2026-11-12T15:30:00+08:00","title":"周末安排",' +
+      '"content":"张三：周六一起吃饭","confidence":0.92}',
+  );
+  check("解析出正文", ocrParsed.content === "张三：周六一起吃饭");
+  check("解析出标题", ocrParsed.title === "周末安排", ocrParsed.title);
+  check("带时区的时间统一转成 UTC", ocrParsed.capturedAt === "2026-11-12T07:30:00.000Z", ocrParsed.capturedAt);
+  check("置信度原样带回", ocrParsed.confidence === 0.92, ocrParsed.confidence);
+
+  const fenced = parseOcrJson('```json\n{"content":"围栏里的正文"}\n```');
+  check("代码围栏能剥掉", fenced.content === "围栏里的正文", fenced.content);
+
+  const chatty = parseOcrJson('好的，抽取结果如下：\n{"content":"夹在解释里"}\n以上。');
+  check("前后夹解释也能取出 JSON", chatty.content === "夹在解释里", chatty.content);
+
+  const badTime = parseOcrJson('{"capturedAt":"明天下午","content":"看不出日期"}');
+  check(
+    "解析不了的时间被丢掉，正文保留",
+    badTime.capturedAt === undefined && badTime.content === "看不出日期",
+    badTime,
+  );
+
+  const longTitle = parseOcrJson(JSON.stringify({ content: "x", title: "标".repeat(100) }));
+  check("标题截到 80 字", longTitle.title?.length === 80, longTitle.title?.length);
+
+  check("置信度夹到 0~1", parseOcrJson('{"content":"x","confidence":1.7}').confidence === 1);
+
+  let emptyErr = "";
+  try {
+    parseOcrJson('{"title":"只有标题"}');
+  } catch (err) {
+    emptyErr = err instanceof Error ? err.message : String(err);
+  }
+  check("空正文按失败处理", emptyErr.includes("没有 content 字段"), emptyErr);
+
+  let notJsonErr = "";
+  try {
+    parseOcrJson("抱歉，我看不清这张图");
+  } catch (err) {
+    notJsonErr = err instanceof Error ? err.message : String(err);
+  }
+  check("非 JSON 报错并带原文", notJsonErr.includes("不是 JSON 对象") && notJsonErr.includes("我看不清"), notJsonErr);
+
+  let keyErr = "";
+  try {
+    await createVisionExtractor({ apiKey: "" }).extract({
+      filePath: "smoke.png",
+      bytes: Buffer.from([1]),
+      mime: "image/png",
+    });
+  } catch (err) {
+    keyErr = err instanceof Error ? err.message : String(err);
+  }
+  check(
+    "缺 key 的报错点名两个环境变量",
+    keyErr.includes("RELATIONSHIP_OCR_API_KEY") && keyErr.includes("DASHSCOPE_API_KEY"),
+    keyErr,
+  );
+
+  let bigErr = "";
+  try {
+    await createVisionExtractor({ apiKey: "sk-smoke-not-real" }).extract({
+      filePath: "big.png",
+      bytes: Buffer.alloc(11 * 1024 * 1024),
+      mime: "image/png",
+    });
+  } catch (err) {
+    bigErr = err instanceof Error ? err.message : String(err);
+  }
+  check("超大图片在发请求前被拦下", bigErr.includes("图片过大"), bigErr);
 
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;

@@ -30,6 +30,16 @@ npm run judge -- --session sess_xxx
 
 # 证据入库（哈希去重 + 按类型 TTL + 自动摘要）
 npm run ingest -- --file data/inbox/evidence.json
+npm run ingest -- --ics data/inbox/calendar.ics --person p_001
+# 截图：不加 --ocr 就落待确认；加 --ocr 才会真的调视觉模型
+npm run ingest -- --image data/inbox/chat.png --person p_001 --ocr
+
+# 人工审核待确认材料
+npm run review
+npm run review -- --accept ev_xxx --content "补上的正文"
+
+# 截图 OCR 单独验收（只调模型，不写库）
+npm run ocr-check -- --image D:\path\to\chat.png
 
 # 评测中心：按「结果 / 轨迹 / 代价」三轴出报告，和基线比
 npm run eval
@@ -68,6 +78,16 @@ export RELATIONSHIP_MODEL_API_KEY=sk-xxx
 export RELATIONSHIP_MODEL_ID=qwen-plus
 ```
 
+截图 OCR 单独一套配置，走百炼 compatible-mode 的视觉模型（默认 `qwen-vl-max`）。
+不配也能跑，截图会落 `pending_review` 等人工确认。
+
+```bash
+export DASHSCOPE_API_KEY=sk-xxx
+npm run ocr-check -- --image D:\path\to\chat.png
+```
+
+其他可选：`RELATIONSHIP_OCR_API_KEY`（单独一把 key）、`RELATIONSHIP_OCR_MODEL`、`RELATIONSHIP_OCR_BASE_URL`。
+
 ## 目录
 
 ```
@@ -92,6 +112,9 @@ src/
   runtime/device.ts      设备适配层（M1 是 mock，支持 partial / 冲突类失败 / 幂等查询）
   runtime/survey.ts      问卷 / 确认 / 审核的 CLI 与脚本实现
   ingest/evidence.ts     证据入库：哈希去重、按类型 TTL、入库即生成摘要
+  ingest/calendar.ts     ICS 解析：折行 / 转义 / 时区 / 全天 / 取消，一条事件一条证据
+  ingest/screenshot.ts   截图入库：字节哈希去重，抽不出正文就落 pending_review
+  ingest/ocr.ts          截图 OCR：视觉模型 + JSON 字段抽取，注入给 screenshot.ts
   eval/judge.ts          规则 Judge + LLM Judge 接口
   eval/case.ts           评测用例的数据格式
   eval/runner.ts         用例执行器：独立存储、独立设备、独立模型队列
@@ -105,7 +128,9 @@ scripts/smoke.ts         边界用例：配对修复、TTL、问卷恢复、回�
 scripts/audit.ts         边界审计：15 个攻击用例
 scripts/trace.ts         轨迹回放（第 2 层评测）：消息 / 访问 / 问卷 / 压缩 / 用量 / 接管
 scripts/judge.ts         规则 Judge 入口
-scripts/ingest.ts        批量导入证据
+scripts/ingest.ts        批量导入证据（JSON / ICS / 截图，`--ocr` 才调视觉模型）
+scripts/review.ts        人工审核待确认证据（列出 / 接受 / 拒绝）
+scripts/ocr-check.ts     截图 OCR 验收：只调模型不写库，打印抽取结果和耗时
 scripts/eval.ts          评测入口：跑用例、算指标、比基线
 scripts/collect.ts       会话 → 用例草稿
 scripts/reconcile.ts     崩溃对账命令
@@ -134,6 +159,8 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 - [x] 会话持久化（每条消息落盘）+ toolCall/toolResult 配对修复
 - [x] 证据 TTL：截图过期后只留摘要，正文不再进上下文
 - [x] 证据入库管线：哈希去重、按类型 TTL、入库即生成摘要
+- [x] 三个导入通道：JSON / ICS（时区、折行、转义、取消）/ 截图 OCR（视觉模型 + JSON 字段抽取）
+- [x] 待人工确认状态 `pending_review`：快照、检索、工具读取三层过滤，`npm run review` 接受或拒绝
 - [x] 证据访问审计：谁在哪个会话读过哪条证据
 - [x] 人工接管：护栏中断 / 设备失败时把会话交回人手里
 - [x] 崩溃对账：`submitted` 且无回执的卡，按设备幂等查询给出采纳 / 回退 / 升级三种结局
@@ -141,7 +168,7 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 - [x] 运行护栏：轮次 / 单轮次数 / 连续失败 / 重复调用 / 墙钟
 - [x] 上下文压缩接进主链路，压缩记录带 generation CAS
 - [x] 评测第 1 层：边界审计 15 个用例，拦截率 15/15
-- [x] 评测中心：用例是数据、分维度指标、基线 + 回归判定（6 条用例，可扩展）
+- [x] 评测中心：用例是数据、分维度指标、基线 + 回归判定（8 条用例，可扩展）
 - [x] 数据闭环：`collect` 把真实会话回收成用例草稿
 - [x] 评测第 2 层：轨迹回放（request / session / person）
 - [x] 评测第 3 层接口：规则 Judge + `createLlmJudge` 占位
@@ -149,7 +176,8 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 ## 未做（M2 以后）
 
 - 真实设备接入（日历 / IM 通道），当前只有 mock 和 jsonl 账本
-- 聊天截图理解（多模态证据入库），当前证据是已经切好的文本
+- 截图 OCR 没有标注集，准确率只在手工跑过的几张图上确认；`confidence` 只打印，不参与判定
+- 日历 `RRULE` 不展开，只导入首个实例
 - LLM 摘要压缩（现在是结构化裁剪 + 记账）
 - 记忆文档的旧版本历史（现在只存当前版本）
 - 语义评测（LLM Judge 只有接口）

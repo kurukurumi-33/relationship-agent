@@ -49,7 +49,7 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 
 ## M3 证据入库：让证据是真的
 
-**状态：确定性部分已完成（2026-11-11）** — ICS 解析、内容哈希去重、`pending_review` 与审核 CLI 已落地；截图 OCR 等待多模态 key。
+**状态：已完成（2026-11-11）** ICS 解析、内容哈希去重、`pending_review` 与审核 CLI、截图 OCR（视觉模型）已落地；`RRULE` 展开留到后续。
 
 **目标**：现在证据是手写文本。这一阶段把"聊天截图 / 日历"变成入库管线。
 
@@ -88,9 +88,20 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 - 新增 `npm run review`：无参数列出待确认材料；`--accept <id> [--content "正文"] [--title "标题"]` 转成 `active`，没有正文时拒绝接受；`--reject <id>` 转成 `rejected`。空正文的截图必须先补 OCR 结果才能接受。接受后按材料类型重新计算保留期（截图 24h、日历 90d），因为确认之前不能把原文清掉。
 - smoke 新增第 21 段 29 项，共 142 项，覆盖时区换算、折行、转义、取消事件、解析失败、重复导入、快照/检索/工具三层过滤、截图失败与成功两条路径、人工接受与拒绝。
 
+**截图 OCR（2026-11-11）**
+
+- `src/ingest/ocr.ts`：`createVisionExtractor()` 返回一个 `ScreenshotExtractor`，直接把图片 base64 塞进 `ImageContent` 交给视觉模型。默认走百炼 compatible-mode（`https://dashscope.aliyuncs.com/compatible-mode/v1`），模型 `qwen-vl-max`，可用 `RELATIONSHIP_OCR_MODEL` / `RELATIONSHIP_OCR_BASE_URL` 覆盖。
+- key 从 `RELATIONSHIP_OCR_API_KEY` 或 `DASHSCOPE_API_KEY` 读，通过 `completeSimple` 的 `options.apiKey` 传，不改 `process.env`。这样截图 OCR 和主 Agent 可以用两把不同的 key，互不影响。
+- 提示词要求只输出 `{ capturedAt, title, content, confidence }`。`parseOcrJson` 容错三种常见偏差：套了 markdown 代码围栏、前后夹解释文字、`capturedAt` 给的不是合法时间（丢掉时间保留正文）。标题截到 80 字，和参数规则层的标题上限对齐。
+- 失败一律抛异常，由 `ingestScreenshot` 接住落 `pending_review`，不在这里兜底成空正文。所以缺 key、模型超时、返回非 JSON 三种情况走的是同一条人工确认路径，原因写进 `summary`。
+- 超过 10MB 的图片在发请求前就拦掉，避免白付一次上传。
+- `scripts/ingest.ts` 新增 `--ocr`，不加就保持旧行为（落待确认）。新增 `npm run ocr-check -- --image <path>` 作为手工验收入口：只调模型不写库，打印耗时、各字段、正文前五行，`--show-raw` 看全文；key 只打印是否存在和长度。
+- smoke 新增 3 项（缺 key 的截图落待确认、原因可见、不写正文）和第 22 段 13 项（解析合法/围栏/夹解释/坏时间/超长标题/置信度夹取/空正文/非 JSON/缺 key 报错/超大图拦截），共 158 项。
+
 **还没做的**
 
-- 截图 OCR 需要多模态 key（qwen-vl / deepseek-vl）。当前只落了失败路径和注入接口，成功路径用假提取器在 smoke 里验证。
+- OCR 准确率没有标注集。现在只能手工拿几张截图跑 `npm run ocr-check` 看结果，不能报"字段完整率 100%"这种数字。
+- `confidence` 目前只打印，没有参与"低于阈值就不收"的判定。要做的话得先有一个标注集确定阈值。
 - `RRULE` 不展开，只导入首个实例；重复事件会在正文里标注。
 
 ---

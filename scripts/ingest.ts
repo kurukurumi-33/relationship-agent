@@ -4,8 +4,10 @@
  *   npm run ingest -- --file data/inbox/evidence.json
  *   npm run ingest -- --ics data/inbox/calendar.ics --person p_001
  *   npm run ingest -- --image data/inbox/chat.png --person p_001
+ *   npm run ingest -- --image data/inbox/chat.png --person p_001 --ocr
  *   npm run ingest -- --file data/inbox/evidence.json --now 2026-10-31T12:00:00+08:00
  *
+ * --ocr 才会真的调视觉模型，不加就落 pending_review。
  * JSON 文件格式：RawEvidenceInput[] 或 { items: RawEvidenceInput[] }
  */
 import { readFile } from "node:fs/promises";
@@ -16,6 +18,7 @@ import { seedState } from "../src/data/seed.js";
 import { ingestEvidence, type RawEvidenceInput } from "../src/ingest/evidence.js";
 import { ingestIcs } from "../src/ingest/calendar.js";
 import { ingestScreenshot } from "../src/ingest/screenshot.js";
+import { createVisionExtractor } from "../src/ingest/ocr.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -36,10 +39,12 @@ async function main(): Promise<void> {
     console.log("  npm run ingest -- --file data/inbox/evidence.json");
     console.log("  npm run ingest -- --ics data/inbox/calendar.ics --person p_001");
     console.log("  npm run ingest -- --image data/inbox/chat.png --person p_001");
+    console.log("  npm run ingest -- --image data/inbox/chat.png --person p_001 --ocr");
     return;
   }
 
   const now = arg("now") ? new Date(arg("now")!) : new Date();
+  const useOcr = process.argv.includes("--ocr");
   const store = await Store.open(arg("store") ?? join(root, "data", "state.db"));
   // 空库先补种子：外键要求证据必须挂在已存在的联系人上
   await store.seedIfEmpty(seedState);
@@ -48,7 +53,7 @@ async function main(): Promise<void> {
     if (ics) {
       await runIcs(store, ics, person, now);
     } else if (image) {
-      await runImage(store, image, person, now);
+      await runImage(store, image, person, now, useOcr);
     } else if (file) {
       await runJson(store, file, now);
     }
@@ -114,6 +119,7 @@ async function runImage(
   file: string,
   person: string | undefined,
   now: Date,
+  useOcr: boolean,
 ): Promise<void> {
   if (!person) {
     console.error("--image 需要同时指定 --person，例如 --person p_001");
@@ -121,14 +127,20 @@ async function runImage(
     return;
   }
 
-  const result = await ingestScreenshot(store, { personId: person, filePath: file, now });
+  const result = await ingestScreenshot(store, {
+    personId: person,
+    filePath: file,
+    now,
+    extractor: useOcr ? createVisionExtractor() : undefined,
+  });
   console.log(
     `${result.created ? "新增" : "重复跳过"}  ${result.evidence.evidenceId}  ${result.status}  ${result.evidence.title}`,
   );
   if (result.reason) console.log(`  原因：${result.reason}`);
   console.log(
     result.status === "pending_review"
-      ? "\n这条证据不会进入快照，等人工确认后才能被模型读取。"
+      ? "\n这条证据不会进入快照，等人工确认后才能被模型读取。" +
+          (useOcr ? "" : "\n（没加 --ocr，所以没有真的调用视觉模型）")
       : "\n已入库，可以进入快照。",
   );
 }
