@@ -290,7 +290,7 @@
 
 ### 51. 换一个视觉模型要改多少？
 
-答：换模型设 `RELATIONSHIP_OCR_MODEL`，换供应商设 `RELATIONSHIP_OCR_BASE_URL`，前提是对方 OpenAI 兼容、支持 `image_url` 的 base64 内联。默认用的百炼 `qwen-vl-max`。主模型为什么不能顺手拿来 OCR：DeepSeek V4 Pro 的模型定义里 `input` 只有 `text`，图片塞进去直接 400。key 是在 `completeSimple` 的 `options.apiKey` 里单独传的，不改 `process.env`，所以 OCR 和主 Agent 可以用两把不同的 key，也不会互相覆盖。局限是这个设计只验证过百炼一家。
+答：换模型设 `RELATIONSHIP_OCR_MODEL`，换供应商设 `RELATIONSHIP_OCR_BASE_URL`，前提是对方 OpenAI 兼容、支持 `image_url` 的 base64 内联。默认用的百炼 `qwen3-vl-plus`。这里踩过一个坑：一开始按文档默认 `qwen-vl-max`，结果账号下的模型列表里根本没有它，服务端回 404 Model not exist。后来先查 `GET /compatible-mode/v1/models` 看这个 key 到底能看到哪些模型，再定默认值。主模型为什么不能顺手拿来 OCR：DeepSeek V4 Pro 的模型定义里 `input` 只有 `text`，图片塞进去直接 400。key 是在 `completeSimple` 的 `options.apiKey` 里单独传的，不改 `process.env`，所以 OCR 和主 Agent 可以用两把不同的 key，也不会互相覆盖。局限是这个设计只验证过百炼一家。
 
 为什么问：考你知不知道自己方案的适用边界，以及有没有踩过"多模态模型其实是纯文本"这种坑。
 

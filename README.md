@@ -78,8 +78,9 @@ export RELATIONSHIP_MODEL_API_KEY=sk-xxx
 export RELATIONSHIP_MODEL_ID=qwen-plus
 ```
 
-截图 OCR 单独一套配置，走百炼 compatible-mode 的视觉模型（默认 `qwen-vl-max`）。
-不配也能跑，截图会落 `pending_review` 等人工确认。
+截图 OCR 单独一套配置，走百炼 compatible-mode 的视觉模型（默认 `qwen3-vl-plus`）。
+不配也能跑，截图会落 `pending_review` 等人工确认。各账号能看到的模型不一样，
+先查一次：`curl -H "Authorization: Bearer $DASHSCOPE_API_KEY" https://dashscope.aliyuncs.com/compatible-mode/v1/models`。
 
 ```bash
 export DASHSCOPE_API_KEY=sk-xxx

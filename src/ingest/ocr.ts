@@ -9,7 +9,8 @@ import { completeSimple, type Model } from "@mariozechner/pi-ai";
 import type { ScreenshotExtraction } from "./screenshot.js";
 
 const DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-const DEFAULT_MODEL = "qwen-vl-max";
+/** 百炼各账号可见的视觉模型不同，qwen3-vl-plus 覆盖面最广；纯文字识别可用 qwen-vl-ocr */
+export const DEFAULT_OCR_MODEL = "qwen3-vl-plus";
 const DEFAULT_TIMEOUT_MS = 60_000;
 /** DashScope 兼容模式下 base64 内联图片有上传上限，超了先拦掉，别让请求白跑 */
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -135,7 +136,7 @@ export function createVisionExtractor(options: VisionExtractorOptions = {}): Vis
   const baseUrl =
     options.baseUrl ?? process.env.RELATIONSHIP_OCR_BASE_URL?.trim() ?? DEFAULT_BASE_URL;
   const modelId =
-    options.modelId ?? process.env.RELATIONSHIP_OCR_MODEL?.trim() ?? DEFAULT_MODEL;
+    options.modelId ?? process.env.RELATIONSHIP_OCR_MODEL?.trim() ?? DEFAULT_OCR_MODEL;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxTokens = options.maxTokens ?? 2048;
 

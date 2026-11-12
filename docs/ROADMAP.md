@@ -90,7 +90,7 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 
 **截图 OCR（2026-11-11）**
 
-- `src/ingest/ocr.ts`：`createVisionExtractor()` 返回一个 `ScreenshotExtractor`，直接把图片 base64 塞进 `ImageContent` 交给视觉模型。默认走百炼 compatible-mode（`https://dashscope.aliyuncs.com/compatible-mode/v1`），模型 `qwen-vl-max`，可用 `RELATIONSHIP_OCR_MODEL` / `RELATIONSHIP_OCR_BASE_URL` 覆盖。
+- `src/ingest/ocr.ts`：`createVisionExtractor()` 返回一个 `ScreenshotExtractor`，直接把图片 base64 塞进 `ImageContent` 交给视觉模型。默认走百炼 compatible-mode（`https://dashscope.aliyuncs.com/compatible-mode/v1`），模型 `qwen3-vl-plus`（各账号可见的视觉模型不同，实测有的账号没有 `qwen-vl-max`），可用 `RELATIONSHIP_OCR_MODEL` / `RELATIONSHIP_OCR_BASE_URL` 覆盖。
 - key 从 `RELATIONSHIP_OCR_API_KEY` 或 `DASHSCOPE_API_KEY` 读，通过 `completeSimple` 的 `options.apiKey` 传，不改 `process.env`。这样截图 OCR 和主 Agent 可以用两把不同的 key，互不影响。
 - 提示词要求只输出 `{ capturedAt, title, content, confidence }`。`parseOcrJson` 容错三种常见偏差：套了 markdown 代码围栏、前后夹解释文字、`capturedAt` 给的不是合法时间（丢掉时间保留正文）。标题截到 80 字，和参数规则层的标题上限对齐。
 - 失败一律抛异常，由 `ingestScreenshot` 接住落 `pending_review`，不在这里兜底成空正文。所以缺 key、模型超时、返回非 JSON 三种情况走的是同一条人工确认路径，原因写进 `summary`。
