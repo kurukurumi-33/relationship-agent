@@ -210,11 +210,14 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 
 ## 未做（M2 以后）
 
-- 真实设备做了文件日历和 CalDAV：IM 通道（企业微信 / 钉钉）还没接；CalDAV 在 Radicale 上实测通过，Nextcloud / iCloud 没测（差异在 URL 发现和认证方式）
+- CalDAV 在 Radicale 上实测通过，Nextcloud / iCloud 没测（差异在 URL 发现和认证方式）
 - 截图 OCR 没有标注集，准确率只在手工跑过的几张图上确认；`confidence` 只打印，不参与判定
 - 复杂重复规则（`BYSETPOS` / `BYMONTH` / `BYWEEKNO` 等）不展开，只导入首个实例并在正文写明原因
 - 记忆文档的旧版本历史（现在只存当前版本）
 - 语义评测（LLM Judge 只有接口）
 - 多设备、多端回执聚合；失败后的补偿动作
+
+> 2026-11-12 决定：IM 通道（企业微信 / 钉钉）不做。机器人发消息用的是机器人身份，和"以用户名义草拟"冲突；
+> webhook 也没有幂等查询能力，`lookup` 只能抛异常，系统会退化到"状态未知就交给人"。取舍见 `docs/INTERVIEW-QA.md` Q57。
 
 细节和设计取舍见 `D:\relationship-agent\docs\ARCHITECTURE.md`。
