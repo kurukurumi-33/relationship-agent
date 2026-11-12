@@ -89,6 +89,17 @@ npm run ocr-check -- --image D:\path\to\chat.png
 
 其他可选：`RELATIONSHIP_OCR_API_KEY`（单独一把 key）、`RELATIONSHIP_OCR_MODEL`、`RELATIONSHIP_OCR_BASE_URL`。
 
+真实设备第一版是文件日历：确认后的日程和提醒写成 `.ics`，用户再导入系统日历。
+
+```bash
+npm run execute -- --device ics-file
+npm run reconcile -- --device ics-file
+npm run device-check                    # 50 张卡 + 30% 失败，验收设备侧和系统状态是否一致
+```
+
+默认输出到 `data/device-calendar/`，可用 `--calendar-dir` 或 `RELATIONSHIP_CALENDAR_DIR` 改。
+不传 `--device` 时仍然用 mock 设备（写 jsonl 账本），也支持 `RELATIONSHIP_DEVICE=ics-file`。
+
 ## 目录
 
 ```
@@ -110,7 +121,9 @@ src/
   session/resume.ts      配对修复、问卷答案注回、上下文压缩
   runtime/outbox.ts      出站队列：confirmed → submitted → executed/failed，幂等 + 可重试失败
   runtime/reconcile.ts   崩溃对账：处理"设备可能执行了、系统不知道"的卡
-  runtime/device.ts      设备适配层（M1 是 mock，支持 partial / 冲突类失败 / 幂等查询）
+  runtime/device.ts      设备适配层（mock 支持 partial / 冲突类失败 / 幂等查询）
+  runtime/ics-file-device.ts  文件日历设备：把日程和提醒写成可导入的 .ics
+  runtime/create-device.ts    按 --device / RELATIONSHIP_DEVICE 选设备
   runtime/survey.ts      问卷 / 确认 / 审核的 CLI 与脚本实现
   ingest/evidence.ts     证据入库：哈希去重、按类型 TTL、入库即生成摘要
   ingest/calendar.ts     ICS 解析：折行 / 转义 / 时区 / 全天 / 取消，一条事件一条证据
@@ -135,6 +148,7 @@ scripts/ocr-check.ts     截图 OCR 验收：只调模型不写库，打印抽�
 scripts/eval.ts          评测入口：跑用例、算指标、比基线
 scripts/collect.ts       会话 → 用例草稿
 scripts/reconcile.ts     崩溃对账命令
+scripts/device-check.ts  文件日历设备验收：50 张卡 + 故障注入，核对设备侧和系统状态
 scripts/migrate-json.ts  旧 JSON → SQLite 迁移
 scripts/migrate-sqlite-to-pg.ts  SQLite → PostgreSQL 迁移
 scripts/concurrency.ts   跨进程并发验证（fork 两个子进程）
@@ -166,6 +180,7 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 - [x] 证据访问审计：谁在哪个会话读过哪条证据
 - [x] 人工接管：护栏中断 / 设备失败时把会话交回人手里
 - [x] 崩溃对账：`submitted` 且无回执的卡，按设备幂等查询给出采纳 / 回退 / 升级三种结局
+- [x] 真实设备第一版：文件日历，日程和提醒写成 `.ics`，幂等查询靠文件是否存在，`npm run device-check` 验收
 - [x] 会话用量统计（token / 成本）
 - [x] 运行护栏：轮次 / 单轮次数 / 连续失败 / 重复调用 / 墙钟
 - [x] 上下文压缩接进主链路，压缩记录带 generation CAS
@@ -177,7 +192,7 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 
 ## 未做（M2 以后）
 
-- 真实设备接入（日历 / IM 通道），当前只有 mock 和 jsonl 账本
+- 真实设备只做了文件日历：CalDAV（静默写入日历服务）和 IM 通道（企业微信 / 钉钉）还没接
 - 截图 OCR 没有标注集，准确率只在手工跑过的几张图上确认；`confidence` 只打印，不参与判定
 - 复杂重复规则（`BYSETPOS` / `BYMONTH` / `BYWEEKNO` 等）不展开，只导入首个实例并在正文写明原因
 - LLM 摘要压缩（现在是结构化裁剪 + 记账）

@@ -4,6 +4,7 @@
  *   npm run reconcile
  *   npm run reconcile -- --store data/demo-state.json
  *   npm run reconcile -- --older-than 0 --resubmit
+ *   npm run reconcile -- --device ics-file --calendar-dir data/device-calendar
  *
  * --older-than 毫秒数：只看提交早于这么久之前的卡（默认 300000 = 5 分钟）
  * --resubmit：把"回退到 confirmed"的卡立刻重新提交一次
@@ -11,7 +12,7 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Store } from "../src/store/store.js";
-import { MockDevice } from "../src/runtime/device.js";
+import { createDevice } from "../src/runtime/create-device.js";
 import { Outbox } from "../src/runtime/outbox.js";
 import { reconcile } from "../src/runtime/reconcile.js";
 
@@ -26,12 +27,19 @@ function arg(name: string): string | undefined {
 async function main(): Promise<void> {
   const storePath = arg("store") ?? join(root, "data", "state.db");
   const ledgerPath = arg("ledger") ?? join(root, "data", "ledger.jsonl");
+  const calendarDir =
+    arg("calendar-dir") ?? process.env.RELATIONSHIP_CALENDAR_DIR ?? join(root, "data", "device-calendar");
   const olderThanMs = arg("older-than") ? Number(arg("older-than")) : undefined;
 
   const store = await Store.open(storePath);
-  const device = new MockDevice(ledgerPath);
+  const device = createDevice({
+    kind: arg("device") ?? process.env.RELATIONSHIP_DEVICE,
+    ledgerPath,
+    calendarDir,
+  });
   const outbox = new Outbox(store, device);
 
+  console.log(`\n设备：${device.id}`);
   const report = await reconcile(store, device, { olderThanMs });
 
   console.log(`\n对账完成：扫描 ${report.scanned} 张卡`);

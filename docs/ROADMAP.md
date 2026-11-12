@@ -123,6 +123,8 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 
 ## M4 真实设备与回执补偿
 
+**状态：进行中** — 文件日历设备已完成（2026-11-12），CalDAV 与 IM 通道未接。
+
 **目标**：`MockDevice` 换成真实通道，并且处理失败。
 
 **技术栈**
@@ -146,6 +148,19 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 3. 断网中途 kill 进程，重启后能看出哪些卡在 submitted 并继续推进
 
 **预估**：3 天（不含申请 webhook 的等待）
+
+**已完成（2026-11-12）：文件日历设备**
+
+- `src/runtime/ics-file-device.ts`：`execute` 渲染标准 ICS 写到 `data/device-calendar/<requestId>.ics`，`lookup` 查文件是否存在。`UID` 就是 `requestId`，同一个 requestId 重复执行只对应一个文件。
+- 写入用临时文件加 `rename`，目录里出现某个 `.ics` 就意味着内容完整，不存在写了一半的状态，`lookup` 不会把半截文件当成执行成功。
+- 已存在的文件不覆盖：设备上次执行成功、回执却没落库时会重试，这时直接返回 ok，不破坏用户可能已经改过的日程。
+- 失败分两类：`draft_message` 和非法 `at` 属于参数问题，标不可重试；磁盘写不进去标可重试，交给 `Outbox` 的有限重试。查询本身失败必须抛异常，不能返回 `undefined` 冒充"没执行过"。
+- **Windows 的坑**：对"普通文件/子项"做 `stat` 返回的是 `ENOENT` 而不是 `ENOTDIR`，照直翻译会把"查询失败"误判成"设备没执行过"，然后安全重发。`lookup` 先检查设备目录本身是不是目录，才能把这两种情况分开。
+- 文本按 RFC 5545 转义（`\` `;` `,` 和换行），按字节折行到 75 字节且不切断中文字符。提醒用 `VALARM` 加 `TRIGGER:-PT0M`，导入后日历会弹通知。
+- `scripts/execute.ts` / `scripts/reconcile.ts` 支持 `--device ics-file`、`--calendar-dir`，也可以用 `RELATIONSHIP_DEVICE` / `RELATIONSHIP_CALENDAR_DIR`。`Outbox`、执行器、对账一行没改。
+- `npm run device-check` 是验收脚本：默认 50 张卡、30% 失败，核对"执行成功 + 明确失败 = 总数"、无悬挂、每张 executed 恰好一个文件、failed 没有文件、文件能被自己的解析器读回且 UID 对得上。`--lost 0.1` 再加一档"设备执行了但回执丢了"。
+- smoke 新增第 23 段 20 项，共 200 项。
+- 边界：这不是静默写系统日历，只是写出可导入的 `.ics`，用户要手动导入一次。真正的"写入后手机自动同步"要等 CalDAV 版。
 
 ---
 

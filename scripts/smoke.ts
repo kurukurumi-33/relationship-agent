@@ -1,4 +1,4 @@
-import { rm, readFile, writeFile } from "node:fs/promises";
+import { rm, readFile, readdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
@@ -22,7 +22,8 @@ import { reconcile } from "../src/runtime/reconcile.js";
 import { confirmAction } from "../src/runtime/confirm.js";
 import { executeConfirmed } from "../src/runtime/executor.js";
 import type { DeviceAdapter } from "../src/runtime/device.js";
-import type { Receipt } from "../src/domain/types.js";
+import type { ActionCard, Receipt } from "../src/domain/types.js";
+import { IcsFileDevice } from "../src/runtime/ics-file-device.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -1614,6 +1615,131 @@ async function main(): Promise<void> {
     bigErr = err instanceof Error ? err.message : String(err);
   }
   check("超大图片在发请求前被拦下", bigErr.includes("图片过大"), bigErr);
+
+  // ---------- 23. 文件日历设备 ----------
+  console.log("\n[23] 文件日历设备：写 ICS、幂等查询、失败分类");
+  const deviceDir = join(root, "data", "smoke-ics-device");
+  await rm(deviceDir, { recursive: true, force: true });
+  const fileDevice = new IcsFileDevice({
+    dir: deviceDir,
+    clock: () => new Date("2026-11-12T00:00:00.000Z"),
+  });
+  const cardOf = (over: Partial<ActionCard>): ActionCard => ({
+    requestId: "req_ics_1",
+    personId: "p_001",
+    kind: "calendar_event",
+    title: "和张三吃饭",
+    payload: { at: "2026-11-20T19:00:00+08:00", durationMinutes: 90 },
+    reason: "他提过这周有空",
+    sourceIds: ["ev_001"],
+    cardVersion: 1,
+    status: "confirmed",
+    createdAt: "2026-11-12T00:00:00.000Z",
+    ...over,
+  });
+
+  const firstWrite = await fileDevice.execute(cardOf({ title: "吃饭, 带礼物; 别迟到" }));
+  check("文件设备执行成功", firstWrite.status === "ok", firstWrite);
+  const rawIcs = (await fileDevice.readRaw("req_ics_1")) ?? "";
+  check("DTSTART 按 UTC 写入", rawIcs.includes("DTSTART:20261120T110000Z"), rawIcs);
+  check("时长按 payload 写进 DTEND", rawIcs.includes("DTEND:20261120T123000Z"));
+  check("标题里的逗号分号被转义", rawIcs.includes("SUMMARY:吃饭\\, 带礼物\\; 别迟到"), rawIcs);
+  check("UID 用 requestId", rawIcs.includes("UID:req_ics_1"));
+
+  const secondWrite = await fileDevice.execute(cardOf({ title: "改过的标题" }));
+  const afterSecond = (await fileDevice.readRaw("req_ics_1")) ?? "";
+  check(
+    "重复执行不覆盖已有文件",
+    secondWrite.status === "ok" && afterSecond.includes("SUMMARY:吃饭\\, 带礼物\\; 别迟到"),
+    secondWrite.detail,
+  );
+  check("重复执行的回执说明原因", (secondWrite.detail ?? "").includes("已存在"), secondWrite.detail);
+
+  check("lookup 查得到已执行的事件", (await fileDevice.lookup("req_ics_1"))?.status === "ok");
+  check("lookup 查不到未执行的事件", (await fileDevice.lookup("req_missing")) === undefined);
+
+  const draft = await fileDevice.execute(
+    cardOf({ requestId: "req_draft", kind: "draft_message", payload: { text: "hi" } }),
+  );
+  check("消息草稿被明确拒绝", draft.status === "failed" && draft.retryable === false, draft);
+  const badAt = await fileDevice.execute(
+    cardOf({ requestId: "req_bad_at", payload: { at: "2026-11-20T19:00:00" } }),
+  );
+  check("没有时区偏移的时间被拒绝", badAt.status === "failed" && badAt.retryable === false, badAt);
+
+  const reminder = await fileDevice.execute(
+    cardOf({ requestId: "req_reminder", kind: "reminder", payload: { at: "2026-11-21T09:00:00+08:00" } }),
+  );
+  const reminderRaw = (await fileDevice.readRaw("req_reminder")) ?? "";
+  check(
+    "提醒写入 VALARM",
+    reminder.status === "ok" &&
+      reminderRaw.includes("BEGIN:VALARM") &&
+      reminderRaw.includes("TRIGGER:-PT0M"),
+  );
+
+  // 长中文标题会被折行，拿自己的解析器读回来必须还是原样
+  const longEventTitle = "和张三李四王五赵六一起在北院区食堂吃晚饭然后去看电影再回家".repeat(2);
+  await fileDevice.execute(cardOf({ requestId: "req_long", title: longEventTitle }));
+  const longRaw = (await fileDevice.readRaw("req_long")) ?? "";
+  check(
+    "折行后每行不超过 75 字节",
+    longRaw.split("\r\n").every((line) => Buffer.byteLength(line, "utf8") <= 75),
+  );
+  const roundTrip = parseIcs(longRaw, new Date("2026-11-12T00:00:00.000Z"))[0]!;
+  check("折行的标题能原样解析回来", roundTrip.summary === longEventTitle, roundTrip.summary.slice(0, 20));
+
+  const traversal = await fileDevice.execute(cardOf({ requestId: "../evil" }));
+  check("requestId 不能跳出目录", traversal.status === "failed", traversal.detail);
+
+  const notDir = join(root, "data", "smoke-ics-not-a-dir");
+  await writeFile(notDir, "x");
+  const brokenDevice = new IcsFileDevice({ dir: notDir });
+  let lookupErr = "";
+  try {
+    await brokenDevice.lookup("req_ics_1");
+  } catch (err) {
+    lookupErr = err instanceof Error ? err.message : String(err);
+  }
+  check("查询失败要抛异常，不能冒充没执行", lookupErr.length > 0, lookupErr);
+  const brokenWrite = await brokenDevice.execute(cardOf({ requestId: "req_broken" }));
+  check(
+    "写入失败标为可重试",
+    brokenWrite.status === "failed" && brokenWrite.retryable === true,
+    brokenWrite,
+  );
+  await rm(notDir, { force: true });
+
+  // 走一遍 Outbox：确认后的卡变成 executed，设备侧留下对应文件
+  const deviceStorePath = join(root, "data", "smoke-device.db");
+  await Store.reset(deviceStorePath);
+  const deviceStore = await Store.open(deviceStorePath);
+  await deviceStore.seedIfEmpty(seedState);
+  const deviceCard = await deviceStore.createAction({
+    personId: "p_001",
+    kind: "calendar_event",
+    title: "设备联调",
+    payload: { at: "2026-11-25T10:00:00+08:00" },
+    reason: "联调",
+    sourceIds: ["ev_001"],
+  });
+  await deviceStore.updateAction(deviceCard.requestId, deviceCard.cardVersion, {
+    status: "confirmed",
+    confirmedAt: new Date().toISOString(),
+  });
+  const deviceOutbox = new Outbox(deviceStore, fileDevice);
+  const deviceResult = await deviceOutbox.submit(await deviceStore.getAction(deviceCard.requestId));
+  check("Outbox 把卡推进到 executed", deviceResult.card.status === "executed", deviceResult.card.status);
+  check("设备侧留下对应文件", (await fileDevice.readRaw(deviceCard.requestId)) !== undefined);
+  const deviceFiles = await readdir(deviceDir);
+  check(
+    "每个 requestId 只有一个文件",
+    deviceFiles.filter((f) => f === `${deviceCard.requestId}.ics`).length === 1,
+    deviceFiles,
+  );
+  await deviceStore.close();
+  await rm(deviceDir, { recursive: true, force: true });
+  await rm(deviceStorePath, { force: true });
 
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;
