@@ -379,7 +379,6 @@
 - 压缩只在每次 LLM 调用前触发，没有后台任务。
 - 洞察 Agent 和主 Agent 可能提出重复候选，没有按文本去重。
 - `executeConfirmed` 每次全表扫，`applyCandidate` 只重试两次。
-- PG 侧的 `amendAction` 还没实测，Docker 当时没起。
 - `pending_review` 的审核是命令行，没有界面；接受空正文的截图必须先手工补 OCR 结果。
 - 复杂重复规则（`BYSETPOS` / `BYMONTH` 等）不展开，只导入首个实例；展开结果不随日期推移自动补新实例。
 - 真实设备做了文件日历和 CalDAV，IM 通道（企业微信 / 钉钉）没接；CalDAV 只在进程内模拟服务上验过，真实服务的 URL 发现和认证差异没跑过。
