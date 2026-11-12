@@ -1,77 +1,142 @@
 # relationship-agent
 
-人际关系助手 Agent 的后端骨架。用 [pi](https://github.com/earendil-works/pi) 的工具循环做"模型会说"，
-外面的宿主代码负责"能不能做"：只读查询、结构化追问、行动提案、用户确认、设备回执、记忆审核与写入。
+人际关系助手 Agent：把"见一个人之前重新拼一遍上下文"变成一条可追溯的链路。
 
-## 快速开始
+[![CI](https://github.com/kurukurumi-33/relationship-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/kurukurumi-33/relationship-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)
 
-需要 **Node ≥ 22.5**（用内置 `node:sqlite`，不装任何数据库）。
+模型只负责判断和表达。能不能读、能不能写、能不能执行，由宿主代码决定，不靠提示词自律。
+
+## 30 秒看懂
+
+输入是联系人、散落的证据（聊天截图、日历、手记）和一个关系目标。系统把它拆成五步：
+
+```
+证据输入 → 信息补全 → 行动确认 → 设备执行 → 记忆更新
+```
+
+- **工具层拿不到写 API**：模型只能读证据、提行动卡、提记忆候选。
+- **提案不等于执行**：确认是宿主行为，模型无法自签。
+- **每次执行都有幂等键**：requestId 由宿主生成，重试、崩溃、连点都只产生一次副作用。
+- **记忆写入带 generation CAS**：两个会话同时改同一个人，后写的不覆盖先写的。
+- **每条记忆和行动都挂 sourceIds**：跨人引用、编造证据在写入前被拒。
+
+## 跑一遍
+
+需要 Node ≥ 22.5，用内置 `node:sqlite`，不装任何数据库。
 
 ```bash
-cd D:\relationship-agent
+git clone https://github.com/kurukurumi-33/relationship-agent.git
+cd relationship-agent
 npm install
 
-# 不需要任何 API key，用 faux provider 跑完整条链路
-npm run demo
+npm run demo     # 不需要任何 API key，跑完整条链路
+npm run smoke    # 边界用例
+npm run audit    # 15 个攻击用例
+npm run eval     # 36 条评测用例 + 基线回归
+```
 
-# 边界用例
-npm run smoke
+`npm run demo` 的节选：
 
-# 边界审计：15 个攻击用例，输出拦截率
-npm run audit
+```text
+① 装配快照（模型能看到的全部事实）
+② 只读查询 → 追问 → 提案 → 确认 → 回执 → 记忆
+③ 同一张卡重复提交：reused=true，设备账本仍然只有 1 行
+⑥ 过期 generation 写入被拒：记忆文档版本冲突
+⑦ 跨人引用被拒：证据 ev_101 属于 p_002，不属于 p_001
+全部通过 ✅
+```
 
-# 轨迹回放（评测第 2 层）
-npm run trace -- --request req_xxx
-npm run trace -- --session sess_xxx
-npm run trace -- --person p_001
+## 架构
 
-# 评测第 3 层：规则 Judge（零成本） / LLM Judge（语义评分，会花钱）
-npm run judge -- --session sess_xxx
-npm run judge -- --report                       # 规则 Judge 扫最近一次真模型报告
-npm run judge -- --report --llm --limit 3       # 语义 Judge，先试三条
-npm run judge -- --report --llm --out evals/judge-scores.json   # 导出分数
-npm run calibrate -- --init                     # 按分数生成人工打分模板
-npm run calibrate                               # 算 judge 分和人分的相关性
+```mermaid
+flowchart LR
+  U[用户目标] --> A[Agent 工具循环]
+  E[(Evidence 证据)] -->|只读| A
+  M[(Memory 记忆)] -->|快照索引| A
+  A -->|ask_user| S[问卷 / 追问]
+  A -->|propose_action| C[ActionCard proposed]
+  A -->|propose_memory| MC[MemoryCandidate pending]
+  C -->|用户确认| CF[confirmed]
+  CF --> O[Outbox 幂等提交]
+  O --> D[设备：mock / ICS / CalDAV]
+  D --> R[回执]
+  R --> O
+  MC -->|洞察审核 + 用户审核| W[commitMemory generation CAS]
+```
 
-# 证据入库（哈希去重 + 按类型 TTL + 自动摘要）
+模型能读 Evidence 和 MemoryItem，不能写；只能提 ActionCard 和 MemoryCandidate。
+宿主确认后才走 Outbox，设备回执用 requestId 对账。更细的权限边界和崩溃对账见
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+## 评测
+
+| 层 | 命令 | 当前结果 | 能说明什么 |
+|---|---|---|---|
+| 边界审计 | `npm run audit` | 15/15 | 越权读取、跨人引用、伪造证据、自签确认都被拦 |
+| 脚本用例 | `npm run eval` | 36/36，无回归 | 行为契约没退化，改 prompt 或换模型后可以直接比 |
+| 真模型跑批 | `npm run eval:real` | 四轮 47/48，145 次调用 0 越界 | 真实模型下的任务完成率；越界率 95% 上界约 2.1%，是近似值 |
+| 轨迹回放 | `npm run trace` | request / session / person 三种视角 | 能解释一次会话为什么这么答 |
+| 语义评分 | `npm run judge -- --llm` | rubric v1 可跑 | 只能在同一个 rubric 内比较，还没人工校准 |
+
+真模型跑批会产生费用，命令和判读口径写在 [docs/EVAL.md](docs/EVAL.md)。
+145 次调用里 0 次越界，按三倍法则 95% 上界约 2.1%；调用之间存在相关性，
+这个上界只能当近似，不能报"稳定低于 1%"。
+
+## 命令
+
+### 日常验收
+
+| 命令 | 作用 |
+|---|---|
+| `npm run demo` | faux provider 端到端演示，零 key |
+| `npm run smoke` | 边界用例：配对修复、TTL、问卷恢复、回执重试、入库、接管 |
+| `npm run audit` | 15 个攻击用例，输出拦截率 |
+| `npm run eval` | 脚本用例 + 基线回归 |
+| `npm run eval:real` | 真模型跑批，报告写 `evals/report-real.json` |
+| `npm run trace -- --session sess_xxx` | 轨迹回放，也支持 `--request` / `--person` |
+| `npm run judge -- --report` | 规则 Judge，零成本 |
+| `npm run judge -- --report --llm --limit 3` | 语义 Judge，先试三条 |
+| `npm run judge -- --report --llm --out evals/judge-scores.json` | 导出语义分数 |
+| `npm run calibrate -- --init` | 按分数生成人工打分模板 |
+| `npm run calibrate` | 算 judge 分和人分的 Pearson / Spearman / MAE |
+| `npm run collect -- --session sess_xxx` | 把真实会话回收成用例草稿 |
+
+### 证据入库与审核
+
+```bash
 npm run ingest -- --file data/inbox/evidence.json
 npm run ingest -- --ics data/inbox/calendar.ics --person p_001
-# 截图：不加 --ocr 就落待确认；加 --ocr 才会真的调视觉模型
 npm run ingest -- --image data/inbox/chat.png --person p_001 --ocr
 
-# 人工审核待确认材料
-npm run review
+npm run review                                    # 列出待确认材料
 npm run review -- --accept ev_xxx --content "补上的正文"
+npm run review -- --reject ev_xxx
+```
 
-# 截图 OCR 单独验收（只调模型，不写库）
+截图 OCR 有单独的验收入口，只调模型不写库：
+
+```bash
 npm run ocr-check -- --image D:\path\to\chat.png
+npm run ocr-check -- --image D:\path\to\chat.png --show-raw
+```
 
-# 评测中心：按「结果 / 轨迹 / 代价」三轴出报告，和基线比
-npm run eval
-npm run eval -- --tag boundary
-npm run eval -- --update-baseline
-npm run eval:real                      # 真模型跑批，报告写 evals/report-real.json
+### 异步确认与执行
 
-# 把一次真实会话回收成用例草稿（数据闭环入口）
-npm run collect -- --session sess_xxx
+```bash
+npm run pending
+npm run confirm -- --request req_xxx --version 1
+npm run confirm -- --request req_xxx --version 1 --reject
+npm run confirm -- --candidate cand_xxx
 
-# 崩溃对账：找出 submitted 且无回执的卡
-npm run reconcile
+npm run execute                                   # 提交所有已确认的卡
+npm run reconcile                                 # 对账 submitted 且无回执的卡
+```
 
-# 把旧的 state.json 迁到 SQLite（一次性）
-npm run migrate-json -- --from data/state.json --to data/state.db
+### 真模型
 
-# 用 PostgreSQL（先 docker compose up -d）
-# export DATABASE_URL=postgresql://relation:relation@localhost:5432/relation
-npm run pg-check
-
-# 跨进程并发：两个独立 node 进程抢同一条记忆
-npm run concurrency
-
-# SQLite → PostgreSQL 数据迁移（保留 ID，逐表核对条数）
-npm run migrate-pg -- --from data/state.db --to postgresql://relation:relation@localhost:5432/relation
-
-# 接真实模型
+```bash
 export DEEPSEEK_API_KEY=sk-xxx
 npm run dev -- --person p_001 --goal "下周和张三评审，帮我准备会前提醒"
 ```
@@ -84,30 +149,31 @@ export RELATIONSHIP_MODEL_API_KEY=sk-xxx
 export RELATIONSHIP_MODEL_ID=qwen-plus
 ```
 
-截图 OCR 单独一套配置，走百炼 compatible-mode 的视觉模型（默认 `qwen3-vl-plus`）。
-不配也能跑，截图会落 `pending_review` 等人工确认。各账号能看到的模型不一样，
-先查一次：`curl -H "Authorization: Bearer $DASHSCOPE_API_KEY" https://dashscope.aliyuncs.com/compatible-mode/v1/models`。
+截图 OCR 走百炼 compatible-mode 的视觉模型（默认 `qwen3-vl-plus`），配置是另一套：
 
 ```bash
 export DASHSCOPE_API_KEY=sk-xxx
-npm run ocr-check -- --image D:\path\to\chat.png
+# 或单独给 OCR 一把 key
+export RELATIONSHIP_OCR_API_KEY=sk-xxx
+export RELATIONSHIP_OCR_MODEL=qwen3-vl-plus
 ```
 
-其他可选：`RELATIONSHIP_OCR_API_KEY`（单独一把 key）、`RELATIONSHIP_OCR_MODEL`、`RELATIONSHIP_OCR_BASE_URL`。
+不配也能跑，截图会落 `pending_review` 等人工确认。
 
-真实设备第一版是文件日历：确认后的日程和提醒写成 `.ics`，用户再导入系统日历。
+### 真实设备
+
+第一版是文件日历：确认后的日程和提醒写成 `.ics`，用户再导入系统日历。
 
 ```bash
 npm run execute -- --device ics-file
 npm run reconcile -- --device ics-file
-npm run device-check                    # 50 张卡 + 30% 失败，验收设备侧和系统状态是否一致
+npm run device-check                    # 50 张卡 + 30% 失败，核对设备侧和系统状态
 ```
 
 默认输出到 `data/device-calendar/`，可用 `--calendar-dir` 或 `RELATIONSHIP_CALENDAR_DIR` 改。
-不传 `--device` 时仍然用 mock 设备（写 jsonl 账本），也支持 `RELATIONSHIP_DEVICE=ics-file`。
 
-CalDAV 版把事件直接 PUT 到日历服务，手机客户端会自动同步。密码只从环境变量读，
-不接受命令行参数（会留在 shell 历史里）：
+第二版是 CalDAV：事件直接 PUT 到日历服务，手机客户端自动同步。密码只从环境变量读，
+不接受命令行参数，避免留在 shell 历史里。
 
 ```bash
 export RELATIONSHIP_DEVICE=caldav
@@ -116,119 +182,69 @@ export RELATIONSHIP_CALDAV_USER=user
 export RELATIONSHIP_CALDAV_PASSWORD='应用专用密码'
 npm run execute
 npm run reconcile
-
-# 也可以只给某一次命令：
-npm run execute -- --device caldav --caldav-url http://127.0.0.1:5232/me/personal/ --caldav-user me
 ```
+
+### 压测与存储
+
+```bash
+npm run soak          # 故障注入：可重试 / 永久 / 部分成功 / 回执丢失
+npm run crash         # 随机 SIGKILL，验证崩溃恢复
+npm run concurrency   # 两个独立进程抢同一条记忆
+npm run pg-check      # PostgreSQL 适配器
+npm run migrate-json -- --from data/state.json --to data/state.db
+npm run migrate-pg -- --from data/state.db --to postgresql://relation:relation@localhost:5432/relation
+```
+
+PostgreSQL 用 `docker compose up -d` 起，然后 `export DATABASE_URL=postgresql://relation:relation@localhost:5432/relation`。
 
 ## 目录
 
 ```
 src/
-  domain/types.ts        领域模型：Person / Evidence / MemoryDoc / ActionCard / SurveyRecord / FactConflict
-  store/schema.sql       12 张表（SQLite / PostgreSQL 共用一份 DDL）
-  store/port.ts          StorePort 接口 + GenerationConflictError / NotFoundError
-  store/db.ts            驱动抽象：all / one / run / transaction
-  store/sqlite-db.ts     SQLite 适配器（node:sqlite，进程内事务串行）
-  store/pg-db.ts         PostgreSQL 适配器（连接池，? → ）
-  store/sql-store.ts     通用 SQL 实现：48 个方法只写一份
-  store/store.ts         入口：有 DATABASE_URL 用 PG，否则用 SQLite
-  agent/snapshot.ts      按 personID 装配 MemorySnapshot（含时间、时区、冲突、关系目标）
-  agent/tools.ts         5 个工具：2 只读、1 追问、2 提案
-  agent/insight.ts       独立洞察 Agent：审核候选、登记冲突
-  agent/guard.ts         轮次 / 单轮次数 / 连续失败 / 重复调用 / 墙钟护栏
-  agent/prompt.ts        系统提示词
-  session/run.ts         宿主编排：快照 → 模型循环 → 确认 → 提交 → 回执 → 洞察 → 记忆
-  session/resume.ts      配对修复、问卷答案注回、上下文压缩
-  runtime/outbox.ts      出站队列：confirmed → submitted → executed/failed，幂等 + 可重试失败
-  runtime/reconcile.ts   崩溃对账：处理"设备可能执行了、系统不知道"的卡
-  runtime/device.ts      设备适配层（mock 支持 partial / 冲突类失败 / 幂等查询）
-  runtime/ics-render.ts  日程和提醒的 VEVENT 渲染（两个日历设备共用）
-  runtime/ics-file-device.ts  文件日历设备：把日程和提醒写成可导入的 .ics
-  runtime/caldav-device.ts    CalDAV 设备：条件 PUT 到日历服务，GET 做幂等查询
-  runtime/create-device.ts    按 --device / RELATIONSHIP_DEVICE 选设备
-  runtime/survey.ts      问卷 / 确认 / 审核的 CLI 与脚本实现
-  ingest/evidence.ts     证据入库：哈希去重、按类型 TTL、入库即生成摘要
-  ingest/calendar.ts     ICS 解析：折行 / 转义 / 时区 / 全天 / 取消，一条事件一条证据
-  ingest/screenshot.ts   截图入库：字节哈希去重，抽不出正文就落 pending_review
-  ingest/ocr.ts          截图 OCR：视觉模型 + JSON 字段抽取，注入给 screenshot.ts
-  eval/judge.ts          规则 Judge + LLM Judge（rubric v1）
-  eval/stats.ts          校准用的相关系数 / 平均绝对误差
-  eval/case.ts           评测用例的数据格式
-  eval/runner.ts         用例执行器：独立存储、独立设备、多会话、独立模型队列
-  cli.ts                 真实模型入口
-evals/
-  cases/*.json           评测用例（数据，不是代码）
-  baseline.json          基线（谁通过了，改坏了会报回归）
-  report.md             最近一次评测报告
-scripts/demo.ts          faux provider 端到端演示（带断言）
-scripts/smoke.ts         边界用例：配对修复、TTL、问卷恢复、回执重试、入库、接管
-scripts/audit.ts         边界审计：15 个攻击用例
-scripts/trace.ts         轨迹回放（第 2 层评测）：消息 / 访问 / 问卷 / 压缩 / 用量 / 接管
-scripts/judge.ts         第 3 层评测入口：单会话 / 扫报告 / 语义评分 / 导出分数
-scripts/calibrate.ts     Judge 校准：人工打分模板 + 相关性统计
-scripts/ingest.ts        批量导入证据（JSON / ICS / 截图，`--ocr` 才调视觉模型）
-scripts/review.ts        人工审核待确认证据（列出 / 接受 / 拒绝）
-scripts/ocr-check.ts     截图 OCR 验收：只调模型不写库，打印抽取结果和耗时
-scripts/eval.ts          评测入口：跑用例、算指标、比基线
-scripts/collect.ts       会话 → 用例草稿
-scripts/reconcile.ts     崩溃对账命令
-scripts/device-check.ts  文件日历设备验收：50 张卡 + 故障注入，核对设备侧和系统状态
-scripts/migrate-json.ts  旧 JSON → SQLite 迁移
-scripts/migrate-sqlite-to-pg.ts  SQLite → PostgreSQL 迁移
-scripts/concurrency.ts   跨进程并发验证（fork 两个子进程）
-data/seed.ts             演示种子数据
-docs/ARCHITECTURE.md     设计与约束说明
-docs/ALIGNMENT.md        与推荐博主架构的逐项对照和取舍
-docs/INFERRED.md         原文档没给的部分：推断过程、补了什么、哪些不确定
-docs/EVAL.md             评测中心：闭环、指标定义、用例格式
-docs/ROADMAP.md          阶段计划
-docs/LEARNING-PLAN.md    能力缺口与学习路径
+  domain/                领域模型
+  store/                 存储层：SQLite / PostgreSQL 两个驱动，一份 SQL
+  agent/                 快照、工具、提示词、洞察 Agent、护栏
+  session/               会话编排、断点恢复、上下文压缩
+  runtime/               问卷、Outbox、对账、设备适配层
+  ingest/                证据入库：JSON / ICS / 截图 OCR
+  eval/                  用例格式、执行器、规则 Judge、LLM Judge
+scripts/                 demo / smoke / audit / eval / trace / judge / 压测 / 迁移
+evals/cases/*.json       评测用例（数据，不是代码）
+docs/                    设计、评测、路线图、面试问答
 ```
 
-## 当前完成度（M1 + 对齐推荐架构）
+## 完成度
 
-- [x] MemorySnapshot 装配（记忆 + 证据索引 + 未结束行动 + 时间/时区/关系目标/事实冲突）
-- [x] 只读工具（读证据正文、证据检索），工具层拿不到写入 API
-- [x] 结构化追问 `ask_user`，**问卷持久化 + 断点恢复**（答案注回原 toolCall）
-- [x] 行动卡提案 `propose_action` → 用户确认 → Outbox 提交 → 设备回执（ok / partial / failed）
-- [x] 记忆候选 `propose_memory` → **洞察 Agent 审核** → 用户审核 → generation CAS 写入
-- [x] 独立洞察 Agent：过滤临时指令、登记事实冲突
-- [x] requestId 幂等（行动卡级 + 请求级重放）、卡片版本校验、sourceIds 跨人校验
-- [x] 存储换成 SQLite：CAS 与幂等由数据库保证，两连接并发写入恰好一个成功
-- [x] 会话持久化（每条消息落盘）+ toolCall/toolResult 配对修复
-- [x] 证据 TTL：截图过期后只留摘要，正文不再进上下文
-- [x] 证据入库管线：哈希去重、按类型 TTL、入库即生成摘要
-- [x] 三个导入通道：JSON / ICS（时区、折行、转义、取消、`RRULE` 展开）/ 截图 OCR（视觉模型 + JSON 字段抽取）
-- [x] 重复日程展开：`DAILY` / `WEEKLY` / `MONTHLY` / `YEARLY`，支持 `INTERVAL` / `COUNT` / `UNTIL` / `BYDAY` / `BYMONTHDAY` / `EXDATE`，窗口 90 天、单事件上限 120 个实例
-- [x] 待人工确认状态 `pending_review`：快照、检索、工具读取三层过滤，`npm run review` 接受或拒绝
-- [x] 证据访问审计：谁在哪个会话读过哪条证据
-- [x] 人工接管：护栏中断 / 设备失败时把会话交回人手里
-- [x] 崩溃对账：`submitted` 且无回执的卡，按设备幂等查询给出采纳 / 回退 / 升级三种结局
-- [x] 真实设备第一版：文件日历，日程和提醒写成 `.ics`，幂等查询靠文件是否存在，`npm run device-check` 验收
-- [x] 真实设备第二版：CalDAV，条件 PUT（`If-None-Match: *`）保证同一 requestId 不重复写入，GET 做幂等查询
-- [x] 会话用量统计（token / 成本）
-- [x] 运行护栏：轮次 / 单轮次数 / 连续失败 / 重复调用 / 墙钟
-- [x] 上下文压缩接进主链路，压缩记录带 generation CAS
-- [x] 评测第 1 层：边界审计 15 个用例，拦截率 15/15
-- [x] 评测中心：用例是数据、分维度指标、基线 + 回归判定（36 条用例，可扩展）
-- [x] 数据闭环：`collect` 把真实会话回收成用例草稿
-- [x] 评测第 2 层：轨迹回放（request / session / person）
-- [x] 评测第 3 层：规则 Judge（零成本、可复现）+ LLM Judge（rubric v1，解析失败直接报错不静默给分）+ 人工校准脚本
-- [x] 用例层支持多会话（跨会话记忆）和保留期边界，断言可以直接看工具返回（`tools.outputContains`）
-- [x] 追问回答落成证据：`sourceIds` 可以引用用户口述内容，"问完再做"不再被拒
+| 里程碑 | 状态 | 内容 | 可验证结果 |
+|---|---|---|---|
+| M1 | ✅ 2026-10 | 端到端最小闭环 | `npm run demo` 全绿 |
+| M2 | ✅ 2026-11-06 | SQLite / PostgreSQL，CAS 与幂等下沉到数据库 | 两连接并发写同一人，恰好一个成功 |
+| M3 | ✅ 2026-11-12 | 证据入库：JSON / ICS / 截图，哈希去重、TTL、RRULE 展开 | `npm run smoke` 第 21 段 |
+| M4 | ✅ 2026-11-12 | 文件日历 + CalDAV，失败重试与崩溃对账 | `npm run device-check` 50 张卡，悬挂 0 |
+| M5 | ✅ 2026-11-11 | 异步确认队列 + 会话摘要与召回 | `npm run pending` / `confirm` / `execute`；`npm run probe` |
+| M6 | ✅ 2026-11-12 | 评测中心：36 条用例、基线、轨迹、规则 / LLM Judge | `npm run eval` 36/36，`npm run audit` 15/15 |
 
-## 未做（M2 以后）
+## 已知限制
 
-- CalDAV 在 Radicale 上实测通过，Nextcloud / iCloud 没测（差异在 URL 发现和认证方式）
-- 截图 OCR 没有标注集，准确率只在手工跑过的几张图上确认；`confidence` 只打印，不参与判定
-- 复杂重复规则（`BYSETPOS` / `BYMONTH` / `BYWEEKNO` 等）不展开，只导入首个实例并在正文写明原因
-- 记忆文档的旧版本历史（现在只存当前版本）
-- LLM Judge 和校准脚本都齐了，缺人工打分数据；没跑过全量语义评分，稳定性未验证
-- `sourceIds` 只校验存在和归属，不校验证据内容是否支撑卡片上那句话；口述证据也没有清理策略
-- 多设备、多端回执聚合；失败后的补偿动作
+- **OCR 没有标注集**：准确率只能手工跑 `npm run ocr-check` 看几张图，`confidence` 只打印，不参与判定。
+- **语义评测没有人工校准**：LLM Judge 的 rubric v1 可跑，校准脚本也齐了，缺的是人打分数据。
+- **sourceIds 只校验存在和归属**：不校验证据内容是否支撑卡片上那句话；口述证据能引用，也没有清理策略。
+- **设备只覆盖日历**：文件日历和 CalDAV 之外，IM 明确不做，理由见 [docs/INTERVIEW-QA.md](docs/INTERVIEW-QA.md) Q57。
+- **SQLite 是单机**：多机部署要换 PostgreSQL；PG 适配器和迁移脚本已有，但没在真实多实例下压过。
+- **记忆只存当前版本**：没有历史版本；重复日程是入库时的 90 天快照，不会自动往后补。
+- **统计效力有限**：145 次调用 0 越界，95% 上界约 2.1%，调用之间相关，只能当近似。
+- **真实模型有抖动**：同一用例连跑结果不完全一致，指标要看多条用例的比率，不能看单条。
 
-> 2026-11-12 决定：IM 通道（企业微信 / 钉钉）不做。机器人发消息用的是机器人身份，和"以用户名义草拟"冲突；
-> webhook 也没有幂等查询能力，`lookup` 只能抛异常，系统会退化到"状态未知就交给人"。取舍见 `docs/INTERVIEW-QA.md` Q57。
+## 文档
 
-细节和设计取舍见 `D:\relationship-agent\docs\ARCHITECTURE.md`。
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：权限边界、数据模型、幂等、CAS、崩溃对账
+- [docs/EVAL.md](docs/EVAL.md)：评测闭环、指标定义、用例格式、真模型判读口径
+- [docs/ROADMAP.md](docs/ROADMAP.md)：M2 到 M6 的逐阶段验收记录
+- [docs/ALIGNMENT.md](docs/ALIGNMENT.md)：与推荐架构的逐项对照和取舍
+- [docs/INTERVIEW-QA.md](docs/INTERVIEW-QA.md)：每个设计点会被怎么追问
+- [docs/INFERRED.md](docs/INFERRED.md)：原文档没给的部分，推断过程和不确定项
+- [docs/LEARNING-PLAN.md](docs/LEARNING-PLAN.md)：能力缺口与学习路径
+
+## License
+
+[MIT](LICENSE)

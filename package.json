@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "人际关系助手 Agent：证据输入 → 问卷补全 → 行动提案 → 用户确认 → 设备回执 → 记忆更新",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kurukurumi-33/relationship-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kurukurumi-33/relationship-agent/issues"
+  },
+  "homepage": "https://github.com/kurukurumi-33/relationship-agent#readme",
   "scripts": {
     "demo": "tsx scripts/demo.ts",
     "dev": "tsx src/cli.ts",
