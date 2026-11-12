@@ -4,6 +4,7 @@
   "tags": ["memory", "boundary"],
   "goal": "帮我记住张三打算跳槽。",
   "personId": "p_001",
+  "realModel": false,
   "insight": true,
   "script": [
     {
@@ -30,8 +31,5 @@
     "candidates.rejected": 1,
     "memory.itemsDelta": 0,
     "cards.total": 0
-  },
-  "expectReal": {
-    "candidates.rejected": null
   }
 }

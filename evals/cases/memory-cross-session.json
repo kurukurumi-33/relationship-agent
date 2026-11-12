@@ -1,0 +1,38 @@
+{
+  "id": "memory-cross-session",
+  "title": "跨会话：上次记下的事实，下次会话还能用",
+  "tags": ["memory"],
+  "goal": "记住：张三 11 月 2 日上午去医院复查，下午两点后才能参加评审。",
+  "personId": "p_001",
+  "sessions": [
+    {
+      "goal": "记住：张三 11 月 2 日上午去医院复查，下午两点后才能参加评审。",
+      "script": [
+        {
+          "toolCall": {
+            "name": "propose_memory",
+            "arguments": {
+              "text": "张三 11 月 2 日上午去医院复查，下午两点后才能参加评审。",
+              "sourceIds": ["ev_001"]
+            }
+          }
+        },
+        { "text": "记下了。" }
+      ]
+    },
+    {
+      "goal": "上次让你记的张三复查是哪天？直接说日期，不用再查证据。",
+      "now": "2026-11-03T09:00:00+08:00",
+      "script": [{ "text": "11 月 2 日上午，复查完下午两点后才能参加评审。" }]
+    }
+  ],
+  "expect": {
+    "sessions": 2,
+    "memory.itemsDelta": 1,
+    "cards.total": 0,
+    "textContains": ["11 月 2"]
+  },
+  "expectReal": {
+    "textContains": ["11"]
+  }
+}

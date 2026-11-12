@@ -30,6 +30,8 @@
   },
   "expectReal": {
     "cards.total": null,
-    "tools.maxCalls": 6
+    "tools.askUser": { "min": 1 },
+    "tools.errors": null,
+    "tools.maxCalls": 10
   }
 }

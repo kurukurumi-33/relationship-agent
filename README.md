@@ -25,8 +25,13 @@ npm run trace -- --request req_xxx
 npm run trace -- --session sess_xxx
 npm run trace -- --person p_001
 
-# 规则 Judge（评测第 3 层的接口占位，不是语义评测）
+# 评测第 3 层：规则 Judge（零成本） / LLM Judge（语义评分，会花钱）
 npm run judge -- --session sess_xxx
+npm run judge -- --report                       # 规则 Judge 扫最近一次真模型报告
+npm run judge -- --report --llm --limit 3       # 语义 Judge，先试三条
+npm run judge -- --report --llm --out evals/judge-scores.json   # 导出分数
+npm run calibrate -- --init                     # 按分数生成人工打分模板
+npm run calibrate                               # 算 judge 分和人分的相关性
 
 # 证据入库（哈希去重 + 按类型 TTL + 自动摘要）
 npm run ingest -- --file data/inbox/evidence.json
@@ -147,9 +152,10 @@ src/
   ingest/calendar.ts     ICS 解析：折行 / 转义 / 时区 / 全天 / 取消，一条事件一条证据
   ingest/screenshot.ts   截图入库：字节哈希去重，抽不出正文就落 pending_review
   ingest/ocr.ts          截图 OCR：视觉模型 + JSON 字段抽取，注入给 screenshot.ts
-  eval/judge.ts          规则 Judge + LLM Judge 接口
+  eval/judge.ts          规则 Judge + LLM Judge（rubric v1）
+  eval/stats.ts          校准用的相关系数 / 平均绝对误差
   eval/case.ts           评测用例的数据格式
-  eval/runner.ts         用例执行器：独立存储、独立设备、独立模型队列
+  eval/runner.ts         用例执行器：独立存储、独立设备、多会话、独立模型队列
   cli.ts                 真实模型入口
 evals/
   cases/*.json           评测用例（数据，不是代码）
@@ -159,7 +165,8 @@ scripts/demo.ts          faux provider 端到端演示（带断言）
 scripts/smoke.ts         边界用例：配对修复、TTL、问卷恢复、回执重试、入库、接管
 scripts/audit.ts         边界审计：15 个攻击用例
 scripts/trace.ts         轨迹回放（第 2 层评测）：消息 / 访问 / 问卷 / 压缩 / 用量 / 接管
-scripts/judge.ts         规则 Judge 入口
+scripts/judge.ts         第 3 层评测入口：单会话 / 扫报告 / 语义评分 / 导出分数
+scripts/calibrate.ts     Judge 校准：人工打分模板 + 相关性统计
 scripts/ingest.ts        批量导入证据（JSON / ICS / 截图，`--ocr` 才调视觉模型）
 scripts/review.ts        人工审核待确认证据（列出 / 接受 / 拒绝）
 scripts/ocr-check.ts     截图 OCR 验收：只调模型不写库，打印抽取结果和耗时
@@ -204,10 +211,12 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 - [x] 运行护栏：轮次 / 单轮次数 / 连续失败 / 重复调用 / 墙钟
 - [x] 上下文压缩接进主链路，压缩记录带 generation CAS
 - [x] 评测第 1 层：边界审计 15 个用例，拦截率 15/15
-- [x] 评测中心：用例是数据、分维度指标、基线 + 回归判定（33 条用例，可扩展）
+- [x] 评测中心：用例是数据、分维度指标、基线 + 回归判定（36 条用例，可扩展）
 - [x] 数据闭环：`collect` 把真实会话回收成用例草稿
 - [x] 评测第 2 层：轨迹回放（request / session / person）
-- [x] 评测第 3 层接口：规则 Judge + `createLlmJudge` 占位
+- [x] 评测第 3 层：规则 Judge（零成本、可复现）+ LLM Judge（rubric v1，解析失败直接报错不静默给分）+ 人工校准脚本
+- [x] 用例层支持多会话（跨会话记忆）和保留期边界，断言可以直接看工具返回（`tools.outputContains`）
+- [x] 追问回答落成证据：`sourceIds` 可以引用用户口述内容，"问完再做"不再被拒
 
 ## 未做（M2 以后）
 
@@ -215,7 +224,8 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 - 截图 OCR 没有标注集，准确率只在手工跑过的几张图上确认；`confidence` 只打印，不参与判定
 - 复杂重复规则（`BYSETPOS` / `BYMONTH` / `BYWEEKNO` 等）不展开，只导入首个实例并在正文写明原因
 - 记忆文档的旧版本历史（现在只存当前版本）
-- 语义评测（LLM Judge 只有接口）
+- LLM Judge 和校准脚本都齐了，缺人工打分数据；没跑过全量语义评分，稳定性未验证
+- `sourceIds` 只校验存在和归属，不校验证据内容是否支撑卡片上那句话；口述证据也没有清理策略
 - 多设备、多端回执聚合；失败后的补偿动作
 
 > 2026-11-12 决定：IM 通道（企业微信 / 钉钉）不做。机器人发消息用的是机器人身份，和"以用户名义草拟"冲突；

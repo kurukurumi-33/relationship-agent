@@ -13,5 +13,8 @@
     "handoffs": 0,
     "tools.maxCalls": 3,
     "textNotContains": ["李四：国庆后找个周末去拍银杏"]
+  },
+  "expectReal": {
+    "tools.maxCalls": 8
   }
 }

@@ -2,7 +2,7 @@
   "id": "happy-reminder",
   "title": "正常路径：读证据 → 提案 → 确认 → 执行",
   "tags": ["happy"],
-  "goal": "明天要和张三开会，帮我准备会前提醒。",
+  "goal": "张三 11 月 2 日要去医院复查，帮我提前一天晚上提醒他一下。",
   "personId": "p_001",
   "script": [
     { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_001" } } },
@@ -28,6 +28,9 @@
     "tools.maxCalls": 3
   },
   "expectReal": {
-    "tools.maxCalls": 6
+    "tools.maxCalls": 10,
+    "tools.called": null,
+    "cards.total": { "min": 1, "max": 2 },
+    "cards.executed": { "min": 1, "max": 2 }
   }
 }

@@ -25,6 +25,8 @@ import type { DeviceAdapter } from "../src/runtime/device.js";
 import type { ActionCard, Receipt } from "../src/domain/types.js";
 import { IcsFileDevice } from "../src/runtime/ics-file-device.js";
 import { CalDavDevice } from "../src/runtime/caldav-device.js";
+import { parseJudgeJson, createLlmJudge } from "../src/eval/judge.js";
+import { meanAbsoluteError, pearson, ranks, spearman } from "../src/eval/stats.js";
 import { createServer } from "node:http";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -1258,6 +1260,56 @@ async function main(): Promise<void> {
   );
   check("过期提示写清楚", expiredRead.note.includes("保留期"), expiredRead.note);
 
+  // 注入时钟：同一份证据在 2026-11-02 没过期，按真实时间已经过期。
+  // 快照、工具、洞察必须共用这个锚点，否则模型看到"有效"却读不到正文。
+  const clockTail = "时钟暗号";
+  const clockShot = await ingestEvidence(
+    ingestStore,
+    {
+      personId: "p_001",
+      kind: "screenshot",
+      capturedAt: "2026-11-01T00:00:00.000Z",
+      title: "时钟边界截图",
+      content: `${"时钟正文。".repeat(30)}${clockTail}`,
+      sourceRef: "smoke-clock.png",
+      contentHash: "sha256:smoke-clock",
+      ttlMs: 5 * 24 * 60 * 60 * 1000,
+    },
+    new Date("2026-11-01T00:00:00.000Z"),
+  );
+  const clockTools = createTools({
+    store: ingestStore,
+    personId: "p_001",
+    sessionId: "sess_clock",
+    survey: async () => ({}),
+    onProposedAction: () => {},
+    onProposedMemory: () => {},
+    now: new Date("2026-11-02T00:00:00.000Z"),
+  });
+  const clockGet = clockTools.find((t) => t.name === "get_evidence_text") as unknown as {
+    execute: (
+      id: string,
+      params: { evidenceId: string },
+    ) => Promise<{ content: { text: string }[] }>;
+  };
+  const clockRead = JSON.parse(
+    (await clockGet.execute("c4", { evidenceId: clockShot.evidence.evidenceId })).content[0]!.text,
+  ) as { expired: boolean; content: string };
+  check(
+    "注入时钟未过期时工具给正文",
+    clockRead.expired !== true && clockRead.content.includes(clockTail),
+    clockRead,
+  );
+  const realRead = JSON.parse(
+    (await getEvidenceTool.execute("c5", { evidenceId: clockShot.evidence.evidenceId })).content[0]!
+      .text,
+  ) as { expired: boolean; content: string };
+  check(
+    "不给时钟时按真实时间判过期",
+    realRead.expired === true && !realRead.content.includes(clockTail),
+    realRead,
+  );
+
   const pendingShotPath = join(root, "data", "smoke-shot.png");
   await writeFile(pendingShotPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]));
   const pendingShot = await ingestScreenshot(ingestStore, {
@@ -1902,6 +1954,143 @@ async function main(): Promise<void> {
 
   caldavServer.closeAllConnections();
   await new Promise<void>((resolve) => caldavServer.close(() => resolve()));
+
+  // ---------- 25. LLM Judge：解析、夹取、失败处理 ----------
+  console.log("\n[25] LLM Judge：解析、夹取、失败处理");
+  const judgeFenced =
+    '抽取结果如下：\n```json\n{"groundedness":1.4,"executionHonesty":-0.2,"relevance":0.8,"notes":["编造了一个日期"]}\n```';
+  const parsedJudge = parseJudgeJson(judgeFenced);
+  check("剥掉代码围栏和前后解释", parsedJudge.relevance === 0.8, parsedJudge);
+  check(
+    "分数夹到 0~1",
+    parsedJudge.groundedness === 1 && parsedJudge.executionHonesty === 0,
+    parsedJudge,
+  );
+  check("保留 notes", parsedJudge.notes[0] === "编造了一个日期", parsedJudge.notes);
+
+  let missingField = "";
+  try {
+    parseJudgeJson('{"groundedness":0.5}');
+  } catch (err) {
+    missingField = err instanceof Error ? err.message : String(err);
+  }
+  check("缺字段直接报错，不静默给 0 分", missingField.includes("executionHonesty"), missingField);
+
+  let notJson = "";
+  try {
+    parseJudgeJson("我觉得还不错");
+  } catch (err) {
+    notJson = err instanceof Error ? err.message : String(err);
+  }
+  check("不是 JSON 直接报错", notJson.includes("不是 JSON"), notJson);
+
+  const fakeJudge = createLlmJudge({
+    modelId: "fake",
+    rubricVersion: "v1",
+    complete: async (prompt) => {
+      check(
+        "prompt 用标签分隔目标和回答",
+        prompt.includes("<goal>") && prompt.includes("<answer>"),
+      );
+      return '{"groundedness":0.5,"executionHonesty":1,"relevance":0.5,"notes":[]}';
+    },
+  });
+  const fakeVerdict = await fakeJudge.judge({
+    goal: "问",
+    answer: "答",
+    evidence: [],
+    cards: [],
+  });
+  check(
+    "createLlmJudge 走注入的 complete",
+    fakeVerdict.groundedness === 0.5 && fakeJudge.name === "llm-judge:fake@v1",
+    fakeJudge.name,
+  );
+
+  // ---------- 26. Judge 校准用的统计 ----------
+  console.log("\n[26] 校准统计：相关系数与平均绝对误差");
+  check("完全正相关 = 1", pearson([1, 2, 3, 4], [2, 4, 6, 8]) === 1);
+  check("完全负相关 = -1", pearson([1, 2, 3, 4], [8, 6, 4, 2]) === -1);
+  check(
+    "常数序列没有相关性",
+    pearson([1, 1, 1], [0.2, 0.5, 0.8]) === null,
+    pearson([1, 1, 1], [0.2, 0.5, 0.8]),
+  );
+  check("长度不一致返回 null", pearson([1, 2], [1]) === null);
+  check("并列分数取平均秩", JSON.stringify(ranks([10, 20, 20, 30])) === JSON.stringify([1, 2.5, 2.5, 4]));
+  check("单调非线性关系斯皮尔曼 = 1", spearman([1, 2, 3], [1, 10, 100]) === 1);
+  check(
+    "平均绝对误差",
+    Math.abs(meanAbsoluteError([1, 0.5], [0.8, 0.5]) - 0.1) < 1e-9,
+    meanAbsoluteError([1, 0.5], [0.8, 0.5]),
+  );
+
+  // ---------- 27. 追问的回答变成可引用的证据 ----------
+  console.log("\n[27] 追问回答：落成证据，可以当行动卡来源");
+  const askPath = join(root, "data", "smoke-ask.db");
+  await Store.reset(askPath);
+  const askStore = await Store.open(askPath);
+  await askStore.seedIfEmpty(seedState);
+  await askStore.saveSession({
+    sessionId: "sess_ask_src",
+    personId: "p_001",
+    messages: [],
+    createdAt: "2026-11-01T08:00:00+08:00",
+    updatedAt: "2026-11-01T08:00:00+08:00",
+  });
+  const askTools = createTools({
+    store: askStore,
+    personId: "p_001",
+    sessionId: "sess_ask_src",
+    survey: async (questions) =>
+      Object.fromEntries(
+        questions.map((q) => [q.id, q.id === "time" ? "明天上午十点" : "没有更多信息"]),
+      ),
+    onProposedAction: () => {},
+    onProposedMemory: () => {},
+    now: new Date("2026-11-01T08:00:00+08:00"),
+  });
+  const askTool = askTools.find((t) => t.name === "ask_user")!;
+  const askResult = await askTool.execute("call_ask_src", {
+    questions: [
+      { id: "time", question: "几点提醒？", options: ["上午十点", "晚上八点"] },
+      { id: "extra", question: "还有别的吗？", options: ["没有"] },
+    ],
+  });
+  const askPayload = JSON.parse(
+    (askResult.content[0] as { text?: string }).text ?? "{}",
+  ) as {
+    answers: Record<string, string>;
+    sources: Record<string, string>;
+  };
+  check(
+    "有效的回答返回 evidenceId",
+    typeof askPayload.sources["time"] === "string" &&
+      askPayload.sources["time"]!.startsWith("ev_"),
+    askPayload.sources,
+  );
+  check("拒绝补充的回答不占证据位", askPayload.sources["extra"] === undefined, askPayload.sources);
+  const askedEvidence = await askStore.getEvidence(askPayload.sources["time"]!);
+  check(
+    "证据能追溯到问卷和问题",
+    /^survey:\/\/svy_[0-9a-f]+#time$/.test(askedEvidence.sourceRef) &&
+      askedEvidence.content.includes("明天上午十点"),
+    askedEvidence.sourceRef,
+  );
+  check("口述证据不设过期", askedEvidence.expiresAt === undefined, askedEvidence.expiresAt);
+  const askedCard = await askStore.createAction({
+    personId: "p_001",
+    kind: "reminder",
+    title: "提醒张三",
+    payload: { at: "2026-11-02T10:00:00+08:00" },
+    reason: "用户说的时间",
+    sourceIds: [askPayload.sources["time"]!],
+  });
+  check(
+    "口述时间通过 sourceIds 校验，不再被拒",
+    askedCard.sourceIds.includes(askPayload.sources["time"]!),
+    askedCard.sourceIds,
+  );
 
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;

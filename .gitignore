@@ -21,5 +21,10 @@ evals/report-real.partial.json
 evals/report-real.partial.md
 evals/probe.json
 evals/cache-probe.json
+# Judge 分数和人工标注是本地跑批的产物，不随仓库走（想共享标注集就手动删掉这两行）
+evals/judge-scores.json
+evals/judge-labels.json
 .env
 *.log
+# 架构图生成物（含本机绝对路径），只留在本地
+.archify/

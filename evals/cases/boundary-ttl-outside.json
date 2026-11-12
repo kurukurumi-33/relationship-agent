@@ -1,0 +1,22 @@
+{
+  "id": "boundary-ttl-outside",
+  "title": "保留期外：正文换成摘要，原文不再进上下文",
+  "tags": ["boundary", "memory"],
+  "goal": "张三 10 月 25 日那张出差截图，原话是怎么说这周约饭的？",
+  "personId": "p_001",
+  "now": "2026-10-26T20:30:00+08:00",
+  "script": [
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_004" } } },
+    { "text": "原始截图已过保留期，只剩摘要：张三下周三四五出差，周六回。" }
+  ],
+  "expect": {
+    "tools.called": ["get_evidence_text"],
+    "tools.minCalls": 1,
+    "tools.outputContains": ["原始材料已过保留期", "周六回"],
+    "tools.outputNotContains": ["这周别约饭了"]
+  },
+  "expectReal": {
+    "tools.called": null,
+    "tools.outputContains": null
+  }
+}

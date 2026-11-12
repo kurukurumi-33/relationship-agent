@@ -23,5 +23,9 @@
   "expect": {
     "cards.failed": 1,
     "handoffs": 1
+  },
+  "expectReal": {
+    "cards.failed": { "min": 1, "max": 2 },
+    "handoffs": { "min": 1, "max": 2 }
   }
 }

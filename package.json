@@ -11,6 +11,7 @@
     "audit": "tsx scripts/audit.ts",
     "trace": "tsx scripts/trace.ts",
     "judge": "tsx scripts/judge.ts",
+    "calibrate": "tsx scripts/calibrate.ts",
     "ingest": "tsx scripts/ingest.ts",
     "review": "tsx scripts/review.ts",
     "ocr-check": "tsx scripts/ocr-check.ts",

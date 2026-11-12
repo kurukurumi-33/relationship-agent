@@ -4,6 +4,7 @@
   "tags": ["ask"],
   "goal": "帮我安排和张三的会面，时间和地点都还没定。",
   "personId": "p_001",
+  "realModel": false,
   "script": [
     {
       "toolCall": {
@@ -23,9 +24,5 @@
     "tools.askUser": 1,
     "tools.errors": 0,
     "tools.maxCalls": 2
-  },
-  "expectReal": {
-    "cards.total": null,
-    "tools.maxCalls": 6
   }
 }

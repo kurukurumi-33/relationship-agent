@@ -11,6 +11,8 @@ export interface InsightOptions {
   model: Model<any>;
   budget?: Budget;
   onEvent?: (event: AgentEvent) => void;
+  /** 会话时间锚点，和主 Agent 共用，保证两边的过期判断一致 */
+  now?: Date;
 }
 
 export interface InsightResult {
@@ -69,6 +71,8 @@ export async function runInsight(opts: {
   onEvent?: (event: AgentEvent) => void;
   /** 权限边界拦下一次调用时回调，由外层累计进会话统计 */
   onDenied?: () => void;
+  /** 会话时间锚点；缺省用真实时间 */
+  now?: Date;
 }): Promise<InsightResult> {
   const { store, personId, sessionId } = opts;
   const created: MemoryCandidate[] = [];
@@ -106,7 +110,7 @@ export async function runInsight(opts: {
         const ev = await store.getEvidence(params.evidenceId);
         if (ev.personId !== personId) throw new PermissionDeniedError("证据不属于当前联系人");
         return {
-          content: text(store.isExpired(ev) ? (ev.summary ?? "原始材料已过期") : ev.content),
+          content: text(store.isExpired(ev, opts.now) ? (ev.summary ?? "原始材料已过期") : ev.content),
           details: {},
         };
       },

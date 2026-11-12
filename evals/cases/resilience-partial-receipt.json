@@ -27,7 +27,7 @@
     "handoffs": 0
   },
   "expectReal": {
-    "cards.total": null,
-    "cards.executed": null
+    "cards.total": { "min": 1, "max": 2 },
+    "cards.executed": { "min": 1, "max": 2 }
   }
 }

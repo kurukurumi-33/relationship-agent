@@ -32,6 +32,28 @@ function arg(name: string): string | undefined {
 }
 const hasFlag = (name: string) => process.argv.includes(`--${name}`);
 
+/** 期望值的有效下限：数字原样，区间取 min，null / 缺省算 0。 */
+function lowerBound(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const min = (value as { min?: unknown }).min;
+    return typeof min === "number" ? min : 0;
+  }
+  return 0;
+}
+
+/** 当前模式下真正生效的期望：真模型下 expectReal 覆盖 expect，null 表示删掉这一条。 */
+function effectiveExpect(c: EvalCase, real: boolean): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...(c.expect ?? {}) };
+  if (real && c.expectReal) {
+    for (const [key, value] of Object.entries(c.expectReal)) {
+      if (value === null) delete merged[key];
+      else merged[key] = value;
+    }
+  }
+  return merged;
+}
+
 async function loadCases(): Promise<EvalCase[]> {
   const files = (await readdir(casesDir)).filter((f) => f.endsWith(".json")).sort();
   const cases: EvalCase[] = [];
@@ -116,14 +138,19 @@ async function main(): Promise<void> {
   const totalToolErrors = results.reduce((n, r) => n + r.toolErrors, 0);
   const totalBlocked = results.reduce((n, r) => n + (r.observed["guard.blocked"] ?? 0), 0);
   const totalCost = results.reduce((n, r) => n + r.cost, 0);
+  const totalEvidenceReads = results.reduce((n, r) => n + (r.observed["evidence.reads"] ?? 0), 0);
+  const totalEvidenceSearches = results.reduce(
+    (n, r) => n + (r.observed["evidence.searches"] ?? 0),
+    0,
+  );
 
-  // 任务完成率：只统计"期望产生真实副作用"的用例（有卡被执行 / 有记忆写入）
-  const taskIds = cases
-    .filter(
-      (c) =>
-        (c.expect?.["cards.executed"] ?? 0) >= 1 || (c.expect?.["memory.itemsDelta"] ?? 0) >= 1,
-    )
-    .map((c) => c.id);
+  // 任务完成率：只统计"期望产生真实副作用"的用例（有卡被执行 / 有记忆写入）。
+  // 按当前模式合并 expect/expectReal 后再判断，否则真模型下被放宽的用例会被算错。
+  const isTaskCase = (c: EvalCase) => {
+    const expect = effectiveExpect(c, real);
+    return lowerBound(expect["cards.executed"]) >= 1 || lowerBound(expect["memory.itemsDelta"]) >= 1;
+  };
+  const taskIds = cases.filter(isTaskCase).map((c) => c.id);
   const taskResults = results.filter((r) => taskIds.includes(r.id));
   const taskCompletion =
     taskResults.length === 0 ? 1 : taskResults.filter((r) => r.passed).length / taskResults.length;
@@ -140,6 +167,7 @@ async function main(): Promise<void> {
   console.log(`  平均工具调用 ${avgToolCalls} 次/用例`);
   console.log(`  工具报错     ${totalToolErrors} 次`);
   console.log(`  护栏拦截     ${totalBlocked} 次`);
+  console.log(`  证据读取     ${totalEvidenceReads} 次读取 / ${totalEvidenceSearches} 次检索`);
 
   console.log("【代价】");
   console.log(`  平均用量     ${avgTokens} tokens/用例（合计 ${results.reduce((n, r) => n + r.tokens, 0)}）`);
@@ -165,6 +193,17 @@ async function main(): Promise<void> {
     console.log(`  越界尝试     ${denied} 次（被权限校验拒绝），共 ${totalCalls} 次工具调用`);
     console.log(`  追问次数     ${askUser}`);
     console.log(`  行动卡       ${cardsProposed} 张，执行成功 ${cardsExecuted} 张`);
+    // 依据使用率：建过卡的用例里，有多少查过证据。只能算"查没查"，
+    // 算不了"查到的证据是否真的支撑那张卡"（那是语义评测的事）。
+    const cardCases = results.filter((r) => (r.observed["cards.total"] ?? 0) > 0);
+    const groundedCases = cardCases.filter(
+      (r) => (r.observed["evidence.reads"] ?? 0) > 0 || (r.observed["evidence.searches"] ?? 0) > 0,
+    );
+    console.log(
+      cardCases.length === 0
+        ? "  依据使用率   本轮没有建卡用例"
+        : `  依据使用率   ${groundedCases.length}/${cardCases.length}（建卡前查过证据的用例占比）`,
+    );
   }
 
   // ---- 基线对比 ----
@@ -218,6 +257,8 @@ async function main(): Promise<void> {
         avgToolCalls: Number(avgToolCalls),
         totalToolErrors,
         totalBlocked,
+        totalEvidenceReads,
+        totalEvidenceSearches,
         totalCost,
         regression,
         results,
@@ -247,7 +288,7 @@ async function main(): Promise<void> {
     "",
     "## 轨迹",
     "",
-    `平均工具调用 ${avgToolCalls} 次/用例，工具报错 ${totalToolErrors} 次，护栏拦截 ${totalBlocked} 次。`,
+    `平均工具调用 ${avgToolCalls} 次/用例，工具报错 ${totalToolErrors} 次，护栏拦截 ${totalBlocked} 次，证据读取 ${totalEvidenceReads} 次 / 检索 ${totalEvidenceSearches} 次。`,
     "",
     "## 代价",
     "",

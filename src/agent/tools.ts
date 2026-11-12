@@ -2,6 +2,7 @@ import { Type } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ActionCard, ActionKind, MemoryCandidate, SurveyQuestion } from "../domain/types.js";
 import type { Store } from "../store/store.js";
+import { ingestEvidence } from "../ingest/evidence.js";
 import { PermissionDeniedError } from "../errors.js";
 
 export type { SurveyQuestion };
@@ -21,6 +22,11 @@ export interface ToolContext {
   onProposedMemory: (candidate: MemoryCandidate) => void;
   /** 权限边界拦下一次调用时回调，host 用它统计越界尝试 */
   onDenied?: () => void;
+  /**
+   * 会话的"当前时间"锚点。过期判断用它，评测才能测"刚好在保留期内"。
+   * 缺省用真实时间，线上行为不变。
+   */
+  now?: Date;
 }
 
 const text = (value: unknown) => [
@@ -146,7 +152,7 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
         actor: "agent",
       });
       // 过了保留期只给摘要。TTL 的承诺是"正文不再进上下文"，只挡快照挡不住按 ID 直接读。
-      if (ctx.store.isExpired(ev)) {
+      if (ctx.store.isExpired(ev, ctx.now)) {
         return {
           content: text({
             evidenceId: ev.evidenceId,
@@ -194,7 +200,7 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
           query: params.query,
           count: hits.length,
           hits: hits.map((e) => {
-            const expired = ctx.store.isExpired(e);
+            const expired = ctx.store.isExpired(e, ctx.now);
             return {
               evidenceId: e.evidenceId,
               kind: e.kind,
@@ -215,7 +221,8 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
     name: "ask_user",
     label: "结构化追问",
     description:
-      "信息不足时向用户提问。一次最多 3 个问题，每个问题带 2~4 个选项。返回用户的选择。",
+      "信息不足时向用户提问。一次最多 3 个问题，每个问题带 2~4 个选项。返回用户的选择；" +
+      "每个非空回答会存成一条证据，返回里的 sources 给出对应 evidenceId，后续 propose_action / propose_memory 可以引用。",
     executionMode: "sequential",
     parameters: AskParams,
     execute: async (toolCallId, params) => {
@@ -228,9 +235,38 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
       });
       const answers = await ctx.survey(params.questions);
       await ctx.store.answerSurvey(survey.surveyId, answers);
+
+      // 用户的回答也是一种证据。不落成证据的话，模型问完时间再建提醒会因为
+      // "口头信息没有 evidenceId" 被 sourceIds 校验拒掉，等于让追问白问。
+      // 只存真正给了信息的回答，"没有更多信息"这类拒绝不占证据位。
+      const sources: Record<string, string> = {};
+      for (const question of params.questions) {
+        const answer = answers[question.id]?.trim();
+        if (!answer || answer === "没有更多信息") continue;
+        const { evidence } = await ingestEvidence(
+          ctx.store,
+          {
+            personId: ctx.personId,
+            kind: "note",
+            capturedAt: (ctx.now ?? new Date()).toISOString(),
+            title: `用户回答：${question.question}`.slice(0, 80),
+            content: `问题：${question.question}\n回答：${answer}`,
+            sourceRef: `survey://${survey.surveyId}#${question.id}`,
+            ttlMs: 0,
+          },
+          ctx.now ?? new Date(),
+        );
+        sources[question.id] = evidence.evidenceId;
+      }
+
       return {
-        content: text({ surveyId: survey.surveyId, answers }),
-        details: { asked: params.questions.length, surveyId: survey.surveyId },
+        content: text({
+          surveyId: survey.surveyId,
+          answers,
+          sources,
+          note: "sources 是这些回答对应 evidenceId，提案时可以直接引用；没有列出的回答表示用户没有再提供信息。",
+        }),
+        details: { asked: params.questions.length, surveyId: survey.surveyId, sources },
       };
     },
   };

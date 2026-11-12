@@ -30,6 +30,11 @@ export interface RunSessionOptions {
   requestId?: string;
   /** 页面上下文：让"帮我改一下"这类指代有落点 */
   pageContext?: PageContext;
+  /**
+   * 会话的"当前时间"锚点。快照里的 now 用它，模型据此判断"明天/已过期"。
+   * 评测必须传固定值，否则同一套用例换一天跑，模型对日期是否过期的判断会变。
+   */
+  now?: Date;
   /** 断点续跑：传入上次持久化的消息（内部会先修 toolCall/toolResult 配对） */
   resumeMessages?: AgentMessage[];
   /** 会话压缩阈值（消息条数）；0 或未设置表示不压缩 */
@@ -167,7 +172,7 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
   const sessionId = opts.sessionId ?? store.newSessionId();
   const budget = opts.budget ?? DEFAULT_BUDGET;
 
-  const snapshot = await buildMemorySnapshot(store, personId);
+  const snapshot = await buildMemorySnapshot(store, personId, opts.now);
   // 快照本身也是一次"读取"：谁在哪个会话里拿到了这个人的全部索引，要留痕
   await store.logAccess({
     sessionId,
@@ -188,6 +193,9 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
     survey: opts.survey,
     onProposedAction: (card) => proposedCards.push(card),
     onProposedMemory: (candidate) => candidates.push(candidate),
+    // 快照和工具必须用同一个时间锚点，否则模型看到"没过期"、
+    // 按 ID 一读却拿到摘要，评测里会变成无法解释的失败。
+    now: opts.now,
     // 权限边界拒掉的调用单独计数：它就是评测里的"越界尝试"
     onDenied: () => {
       guard.stats.deniedCalls += 1;
@@ -379,6 +387,7 @@ export async function runSession(opts: RunSessionOptions): Promise<RunResult> {
       receipts,
       budget: opts.insight.budget,
       onEvent: opts.insight.onEvent,
+      now: opts.now,
       onDenied: () => {
         guard.stats.deniedCalls += 1;
       },

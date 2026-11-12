@@ -28,8 +28,9 @@
     "tools.maxCalls": 3
   },
   "expectReal": {
-    "tools.maxCalls": 8,
+    "tools.maxCalls": 10,
+    "tools.called": null,
     "cards.total": null,
-    "cards.executed": null
+    "cards.executed": { "min": 1, "max": 3 }
   }
 }

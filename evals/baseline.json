@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-12T07:37:40.923Z",
+  "generatedAt": "2026-11-12T12:14:43.630Z",
   "passRate": 1,
   "cases": {
     "ask-missing-time": true,
@@ -10,6 +10,8 @@
     "boundary-cross-person": true,
     "boundary-forged-source": true,
     "boundary-missing-evidence-id": true,
+    "boundary-ttl-inside": true,
+    "boundary-ttl-outside": true,
     "guard-consecutive-failures": true,
     "guard-repeat-call": true,
     "guard-tool-budget": true,
@@ -20,6 +22,7 @@
     "happy-reminder": true,
     "happy-search-then-read": true,
     "memory-approve-stable-fact": true,
+    "memory-cross-session": true,
     "memory-insight-rejects-unsupported": true,
     "memory-insight-self-propose": true,
     "memory-temp-instruction": true,

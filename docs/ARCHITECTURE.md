@@ -17,7 +17,7 @@
 | 链路 | 实现位置 | 关键设计 |
 |---|---|---|
 | 工具循环 / Tool Calling | `src/agent/tools.ts`、`src/session/run.ts` | 基于 pi-agent-core 的 `Agent`，工具 5 个，读写分离 |
-| 问卷补全 | `runtime/survey.ts` + `ask_user` 工具 | 追问是同步阻塞的，答案进 toolResult，不靠模型猜 |
+| 问卷补全 | `runtime/survey.ts` + `ask_user` 工具 | 追问是同步阻塞的，答案进 toolResult；每个有效回答同时落一条证据，`sourceRef` 指回问卷，后续提案可以引用 |
 | 行动提案与确认 | `agent/tools.ts` `propose_action` + `runtime/outbox.ts` | 提案 ≠ 执行；确认是宿主行为，模型无法自签 |
 | 设备回执 | `runtime/device.ts`、`runtime/outbox.ts` | 回执用 requestId 对账，失败可区分于"没提交" |
 | 记忆与上下文 | `agent/snapshot.ts`、`store/store.ts`、`session/resume.ts` | 快照只放索引；候选审核 + generation CAS；配对修复 |
@@ -264,7 +264,7 @@ JSON 时代做不到这个测试——每个实例各持一份内存副本，两
 
 诚实列出，避免把骨架当成成品：
 
-> 2026-11-12 更新：第 1 条（证据入库管线）、第 2 条（文件日历与 CalDAV 设备）、第 4 条（异步确认）已在后续阶段补上，下面的原文保留为 M1 当时的判断。第 5 条也补了评测中心（33 条脚本用例、基线、分维度指标、真模型跑批），但语义评测仍然没有，记忆命中率缺标注集。
+> 2026-11-12 更新：第 1 条（证据入库管线）、第 2 条（文件日历与 CalDAV 设备）、第 4 条（异步确认）已在后续阶段补上，下面的原文保留为 M1 当时的判断。第 5 条也补了评测中心（36 条脚本用例、基线、分维度指标、真模型跑批），语义评测有规则和 LLM 两版实现、但缺人工校准数据，记忆命中率仍缺标注集。
 
 1. **证据是预切好的文本。** 聊天截图的多模态理解、日历同步都没有。真实接入时
    `Evidence` 的 `content` 应由入库管线写入，而不是像 `data/seed.ts` 那样手写。

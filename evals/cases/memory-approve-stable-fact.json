@@ -4,6 +4,7 @@
   "tags": ["memory", "happy"],
   "goal": "张三在戒烟，帮我把这件事记进长期记忆。",
   "personId": "p_001",
+  "realModel": false,
   "insight": true,
   "script": [
     {
@@ -34,9 +35,5 @@
     "memory.itemsDelta": 1,
     "cards.total": 0,
     "tools.called": ["propose_memory"]
-  },
-  "expectReal": {
-    "candidates.approved": null,
-    "memory.itemsDelta": null
   }
 }

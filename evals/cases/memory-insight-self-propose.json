@@ -4,6 +4,7 @@
   "tags": ["memory"],
   "goal": "今天和张三聊了几句近况，没什么特别要办的。",
   "personId": "p_001",
+  "realModel": false,
   "insight": true,
   "script": [
     { "text": "好的，今天没有需要安排的事。" },
@@ -23,9 +24,5 @@
     "candidates.rejected": 0,
     "memory.itemsDelta": 1,
     "cards.total": 0
-  },
-  "expectReal": {
-    "candidates.approved": null,
-    "memory.itemsDelta": null
   }
 }

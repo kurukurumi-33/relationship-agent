@@ -2,7 +2,7 @@
   "id": "happy-ask-then-act",
   "title": "正常路径：追问拿到答案后提案并执行",
   "tags": ["happy", "ask"],
-  "goal": "提醒我 11 月 2 日上午给张三打电话，时间你问我。",
+  "goal": "张三 11 月 2 日上午要去医院复查，帮我设个当天上午给他打电话问情况的提醒，具体时间你问我。",
   "personId": "p_001",
   "script": [
     {
@@ -41,8 +41,8 @@
     "tools.maxCalls": 3
   },
   "expectReal": {
-    "tools.maxCalls": 8,
-    "cards.total": null,
-    "cards.executed": null
+    "tools.maxCalls": 10,
+    "cards.total": { "min": 1, "max": 2 },
+    "cards.executed": { "min": 1, "max": 2 }
   }
 }

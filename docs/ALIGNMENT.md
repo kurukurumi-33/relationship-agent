@@ -105,7 +105,7 @@
 |---|---|---|
 | 第 1 层：接口与状态断言 | 参数、权限、版本、回执、sourceIDs | ✅ `npm run audit`（15 条） |
 | 第 2 层：轨迹 Trace 回放 | 完整回放 toolCall → toolResult → action → 回执 | ✅ `npm run trace`（request / session / person 三个视角） |
-| 第 3 层：语义评测 LLM Judge | 证据一致性、新增价值、可行性 | ⚠️ 只有**规则 Judge**（核对引用是否存在、有没有谎称执行）+ `createLlmJudge` 接口占位 |
+| 第 3 层：语义评测 LLM Judge | 证据一致性、新增价值、可行性 | ✅ 规则 Judge（核对引用是否存在、有没有谎称执行）+ LLM Judge（rubric v1，三项 0~1 分）；缺人工校准 |
 
 规则 Judge 不能替代语义评测，它的分数也不能当"回答质量"讲。这一点在 `src/eval/judge.ts` 里写死了。
 
@@ -129,6 +129,6 @@
 |---|---|---|
 | 记忆旧版本历史 | "保留旧版本"讲不全 | M2 换库时加 `memory_doc_versions` 表 |
 | LLM 摘要压缩 | 只有裁剪，没有语义摘要 | M5，需要先解决多一次模型调用的成本问题 |
-| LLM Judge | 第 3 层只有规则版 | M6 |
+| LLM Judge 的人工校准 | 分数现在只能同 rubric 内纵向比，不能当绝对质量讲 | 抽 20~30 条人工打分算相关性 |
 | 真实设备 / 截图入库 | 仍是 mock 和手写文本 | M3 / M4 |
 | 请求级幂等的"结果存储" | 重放只能回放最后一条回答，不是完整 RunResult | 需要 `session_results` 表，M2 一起做 |
