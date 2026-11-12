@@ -210,7 +210,7 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 
 ## 未做（M2 以后）
 
-- 真实设备做了文件日历和 CalDAV：IM 通道（企业微信 / 钉钉）还没接；CalDAV 只在进程内模拟服务上验过，真实服务（Radicale / Nextcloud / iCloud）要手动跑一次
+- 真实设备做了文件日历和 CalDAV：IM 通道（企业微信 / 钉钉）还没接；CalDAV 在 Radicale 上实测通过，Nextcloud / iCloud 没测（差异在 URL 发现和认证方式）
 - 截图 OCR 没有标注集，准确率只在手工跑过的几张图上确认；`confidence` 只打印，不参与判定
 - 复杂重复规则（`BYSETPOS` / `BYMONTH` / `BYWEEKNO` 等）不展开，只导入首个实例并在正文写明原因
 - LLM 摘要压缩（现在是结构化裁剪 + 记账）

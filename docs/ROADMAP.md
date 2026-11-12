@@ -171,7 +171,7 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 - 凭据只从环境变量 `RELATIONSHIP_CALDAV_PASSWORD` 读，不接受命令行参数，避免留在 shell 历史里。用户名和密码同时决定 Basic 认证头。
 - `create-device.ts` 新增 `caldav`，`execute` / `reconcile` 支持 `--caldav-url` / `--caldav-user`。Outbox、执行器、对账仍然一行没改。
 - smoke 第 24 段用进程内 `node:http` 起了一个最小 CalDAV 服务，覆盖写入、认证、412 幂等、404、401、5xx、查询失败抛异常、Outbox 端到端，共 16 项，**总 216 项**。
-- 边界：只做过进程内模拟服务。真实 CalDAV 服务（Radicale / Nextcloud / iCloud）的差异主要在 URL 发现和认证方式，需要手动跑一次确认；这一步没有自动化，因为跑测试会往真实日历里写事件。
+- 边界：Radicale（`tomsquest/docker-radicale`，本机 5232）实测通过：`PUT` 返回 201，带 `If-None-Match: *` 重复 `PUT` 返回 412，`GET` 返回 200，`lookup` 能查到，读回的 `UID` 对得上 `requestId`。Nextcloud、iCloud 没测，差异主要在 URL 发现和应用专用密码。真实服务测试会往日历里写事件，所以没有放进自动化用例。
 
 ---
 
