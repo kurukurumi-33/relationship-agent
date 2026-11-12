@@ -139,6 +139,12 @@ async function runImage(
     `${result.created ? "新增" : "重复跳过"}  ${result.evidence.evidenceId}  ${result.status}  ${result.evidence.title}`,
   );
   if (result.reason) console.log(`  原因：${result.reason}`);
+  if (result.expiresAt && new Date(result.expiresAt) <= now) {
+    console.log(
+      `  注意：保留期从材料产生时间算起，这条已经过期（${result.expiresAt}）。` +
+        "快照和工具里只会看到摘要，拿不到正文。",
+    );
+  }
   console.log(
     result.status === "pending_review"
       ? "\n这条证据不会进入快照，等人工确认后才能被模型读取。" +

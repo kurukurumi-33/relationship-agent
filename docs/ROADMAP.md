@@ -82,6 +82,7 @@ M1 已完成：端到端最小闭环跑通（`npm run demo` / `npm run smoke` / 
 - `src/ingest/calendar.ts`：ICS 解析。处理折行、`\,` `\;` `\\` `\n` 转义、`DTSTART` / `DTEND` / `DURATION`、UTC（`Z`）、`TZID` 本地时间、浮动时间、全天日期。时区换算只依赖 Node 内置 `Intl`：先假设墙钟是 UTC，再按目标时区反算偏移，算两遍收敛，不引第三方库。
 - `src/ingest/screenshot.ts`：图片按字节哈希去重，解析器通过 `ScreenshotExtractor` 注入。没配提取器、格式不支持、提取器抛错、提取结果为空，四种情况都落 `pending_review`，原因写进 `summary`。
 - `Evidence` 新增 `status`（`active` / `pending_review`）。快照、`search_evidence`、`get_evidence_text` 三处都过滤待确认材料；`listEvidence` 仍然返回全部，供人工审核和审计使用。
+- 保留期三个入口一致（2026-11-12 修）：快照只给摘要，`search_evidence` 的片段和 `get_evidence_text` 的正文在过期后也换成摘要。之前只有快照生效，模型换个工具就能拿到全文。
 - SQLite 用 `PRAGMA table_info` 检查后 `ALTER TABLE` 补列，PostgreSQL 用 `ADD COLUMN IF NOT EXISTS`；旧库打开时自动迁移。
 - 去重键：日历用 `UID + 原始事件块`，不用解析后的时间，避免解析器时区行为变化造成重复入库；截图用图片字节的 sha256，与文件名和导入时间无关。
 - CLI 新增 `--ics` 和 `--image`，都要求 `--person`；重复导入会显示"重复跳过"。
