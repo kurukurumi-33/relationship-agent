@@ -6,6 +6,7 @@
  *   npm run execute -- --limit 10
  *   npm run execute -- --store data/state.db --ledger data/ledger.jsonl
  *   npm run execute -- --device ics-file --calendar-dir data/device-calendar
+ *   npm run execute -- --device caldav --caldav-url http://127.0.0.1:5232/me/personal/
  *
  * 可以挂在定时任务上反复跑；没有待执行的卡时什么都不做。
  */
@@ -37,6 +38,11 @@ async function main(): Promise<void> {
     kind: arg("device") ?? process.env.RELATIONSHIP_DEVICE,
     ledgerPath,
     calendarDir,
+    caldav: {
+      url: arg("caldav-url") ?? process.env.RELATIONSHIP_CALDAV_URL,
+      username: arg("caldav-user") ?? process.env.RELATIONSHIP_CALDAV_USER,
+      password: process.env.RELATIONSHIP_CALDAV_PASSWORD,
+    },
   });
   const outbox = new Outbox(store, device);
   const outcomes = await executeConfirmed(store, outbox, { personId, limit });

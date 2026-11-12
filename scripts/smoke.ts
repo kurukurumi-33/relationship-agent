@@ -24,6 +24,8 @@ import { executeConfirmed } from "../src/runtime/executor.js";
 import type { DeviceAdapter } from "../src/runtime/device.js";
 import type { ActionCard, Receipt } from "../src/domain/types.js";
 import { IcsFileDevice } from "../src/runtime/ics-file-device.js";
+import { CalDavDevice } from "../src/runtime/caldav-device.js";
+import { createServer } from "node:http";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -1740,6 +1742,166 @@ async function main(): Promise<void> {
   await deviceStore.close();
   await rm(deviceDir, { recursive: true, force: true });
   await rm(deviceStorePath, { force: true });
+
+  // ---------- 24. CalDAV 设备 ----------
+  console.log("\n[24] CalDAV 设备：条件写入、幂等查询、HTTP 错误分类");
+  const caldavObjects = new Map<string, string>();
+  let caldavFailNextPut = false;
+  let caldavFailNextGet = false;
+  const expectedAuth = `Basic ${Buffer.from("me:secret", "utf8").toString("base64")}`;
+  const caldavServer = createServer((req, res) => {
+    if (req.headers.authorization !== expectedAuth) {
+      res.writeHead(401);
+      res.end();
+      return;
+    }
+    const key = decodeURIComponent((req.url ?? "").split("/").pop() ?? "");
+    if (req.method === "PUT") {
+      if (caldavFailNextPut) {
+        caldavFailNextPut = false;
+        res.writeHead(500);
+        res.end();
+        return;
+      }
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        if (caldavObjects.has(key)) {
+          res.writeHead(412);
+          res.end();
+          return;
+        }
+        caldavObjects.set(key, body);
+        res.writeHead(201);
+        res.end();
+      });
+      return;
+    }
+    if (req.method === "GET") {
+      if (caldavFailNextGet) {
+        caldavFailNextGet = false;
+        res.writeHead(503);
+        res.end();
+        return;
+      }
+      const body = caldavObjects.get(key);
+      if (body === undefined) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "text/calendar; charset=utf-8",
+        "Last-Modified": new Date("2026-11-12T00:00:00.000Z").toUTCString(),
+      });
+      res.end(body);
+      return;
+    }
+    res.writeHead(405);
+    res.end();
+  });
+  await new Promise<void>((resolve) => caldavServer.listen(0, "127.0.0.1", resolve));
+  const caldavPort = (caldavServer.address() as { port: number }).port;
+  const caldavUrl = `http://127.0.0.1:${caldavPort}/me/personal/`;
+  const caldavDevice = new CalDavDevice({
+    url: caldavUrl,
+    username: "me",
+    password: "secret",
+    clock: () => new Date("2026-11-12T00:00:00.000Z"),
+  });
+
+  const caldavWrite = await caldavDevice.execute(
+    cardOf({ requestId: "req_caldav_1", title: "和张三吃饭, 提前到" }),
+  );
+  check("CalDAV 写入成功", caldavWrite.status === "ok", caldavWrite);
+  const caldavBody = caldavObjects.get("req_caldav_1.ics") ?? "";
+  check("PUT 的正文是标准 ICS", caldavBody.includes("BEGIN:VCALENDAR") && caldavBody.includes("UID:req_caldav_1"), caldavBody);
+  check("DTSTART 按 UTC 写入", caldavBody.includes("DTSTART:20261120T110000Z"), caldavBody);
+
+  const caldavLookup = await caldavDevice.lookup("req_caldav_1");
+  check("lookup 查得到事件", caldavLookup?.status === "ok", caldavLookup);
+  check("lookup 的时间取 Last-Modified", caldavLookup?.at === "2026-11-12T00:00:00.000Z", caldavLookup?.at);
+  check("lookup 查不到未执行的事件", (await caldavDevice.lookup("req_caldav_missing")) === undefined);
+
+  const caldavAgain = await caldavDevice.execute(
+    cardOf({ requestId: "req_caldav_1", title: "改过的标题" }),
+  );
+  check(
+    "条件写入：已存在时按成功处理，不覆盖",
+    caldavAgain.status === "ok" &&
+      (caldavAgain.detail ?? "").includes("已存在") &&
+      (caldavObjects.get("req_caldav_1.ics") ?? "").includes("SUMMARY:和张三吃饭\\, 提前到"),
+    caldavAgain.detail,
+  );
+  check("同一个 requestId 只有一个资源", [...caldavObjects.keys()].filter((k) => k === "req_caldav_1.ics").length === 1);
+
+  const caldavDraft = await caldavDevice.execute(
+    cardOf({ requestId: "req_caldav_draft", kind: "draft_message", payload: { text: "hi" } }),
+  );
+  check("CalDAV 拒绝消息草稿", caldavDraft.status === "failed" && caldavDraft.retryable === false, caldavDraft);
+  const caldavBadAt = await caldavDevice.execute(
+    cardOf({ requestId: "req_caldav_bad", payload: { at: "2026-11-20T19:00:00" } }),
+  );
+  check("CalDAV 拒绝没有时区的时间", caldavBadAt.status === "failed" && caldavBadAt.retryable === false, caldavBadAt);
+  const caldavTraversal = await caldavDevice.execute(cardOf({ requestId: "../evil" }));
+  check("CalDAV 的 requestId 不能跳出日历集合", caldavTraversal.status === "failed", caldavTraversal.detail);
+
+  const wrongAuth = new CalDavDevice({ url: caldavUrl, username: "me", password: "wrong" });
+  const denied = await wrongAuth.execute(cardOf({ requestId: "req_caldav_auth" }));
+  check(
+    "凭据被拒标为不可重试",
+    denied.status === "failed" && denied.retryable === false && (denied.detail ?? "").includes("401"),
+    denied,
+  );
+
+  caldavFailNextPut = true;
+  const serverDown = await caldavDevice.execute(cardOf({ requestId: "req_caldav_500" }));
+  check(
+    "服务端 5xx 标为可重试",
+    serverDown.status === "failed" && serverDown.retryable === true && (serverDown.detail ?? "").includes("500"),
+    serverDown,
+  );
+
+  caldavFailNextGet = true;
+  let caldavLookupErr = "";
+  try {
+    await caldavDevice.lookup("req_caldav_1");
+  } catch (err) {
+    caldavLookupErr = err instanceof Error ? err.message : String(err);
+  }
+  check("查询失败必须抛异常，不能当作没执行", caldavLookupErr.includes("503"), caldavLookupErr);
+
+  const caldavStorePath = join(root, "data", "smoke-caldav.db");
+  await Store.reset(caldavStorePath);
+  const caldavStore = await Store.open(caldavStorePath);
+  await caldavStore.seedIfEmpty(seedState);
+  const caldavCard = await caldavStore.createAction({
+    personId: "p_001",
+    kind: "calendar_event",
+    title: "CalDAV 联调",
+    payload: { at: "2026-11-26T10:00:00+08:00" },
+    reason: "联调",
+    sourceIds: ["ev_001"],
+  });
+  await caldavStore.updateAction(caldavCard.requestId, caldavCard.cardVersion, {
+    status: "confirmed",
+    confirmedAt: new Date().toISOString(),
+  });
+  const caldavOutbox = new Outbox(caldavStore, caldavDevice);
+  const caldavResult = await caldavOutbox.submit(await caldavStore.getAction(caldavCard.requestId));
+  check("Outbox 把卡推进到 executed", caldavResult.card.status === "executed", caldavResult.card.status);
+  check(
+    "设备侧留下对应事件",
+    (await caldavDevice.readRaw(caldavCard.requestId))?.includes(`UID:${caldavCard.requestId}`) === true,
+  );
+  await caldavStore.close();
+  await rm(caldavStorePath, { force: true });
+
+  caldavServer.closeAllConnections();
+  await new Promise<void>((resolve) => caldavServer.close(() => resolve()));
 
   console.log(failures === 0 ? "\n全部通过 ✅" : `\n${failures} 项失败 ❌`);
   process.exitCode = failures === 0 ? 0 : 1;

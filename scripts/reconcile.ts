@@ -5,6 +5,7 @@
  *   npm run reconcile -- --store data/demo-state.json
  *   npm run reconcile -- --older-than 0 --resubmit
  *   npm run reconcile -- --device ics-file --calendar-dir data/device-calendar
+ *   npm run reconcile -- --device caldav --caldav-url http://127.0.0.1:5232/me/personal/
  *
  * --older-than 毫秒数：只看提交早于这么久之前的卡（默认 300000 = 5 分钟）
  * --resubmit：把"回退到 confirmed"的卡立刻重新提交一次
@@ -36,6 +37,11 @@ async function main(): Promise<void> {
     kind: arg("device") ?? process.env.RELATIONSHIP_DEVICE,
     ledgerPath,
     calendarDir,
+    caldav: {
+      url: arg("caldav-url") ?? process.env.RELATIONSHIP_CALDAV_URL,
+      username: arg("caldav-user") ?? process.env.RELATIONSHIP_CALDAV_USER,
+      password: process.env.RELATIONSHIP_CALDAV_PASSWORD,
+    },
   });
   const outbox = new Outbox(store, device);
 

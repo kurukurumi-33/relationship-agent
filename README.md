@@ -100,6 +100,21 @@ npm run device-check                    # 50 张卡 + 30% 失败，验收设备�
 默认输出到 `data/device-calendar/`，可用 `--calendar-dir` 或 `RELATIONSHIP_CALENDAR_DIR` 改。
 不传 `--device` 时仍然用 mock 设备（写 jsonl 账本），也支持 `RELATIONSHIP_DEVICE=ics-file`。
 
+CalDAV 版把事件直接 PUT 到日历服务，手机客户端会自动同步。密码只从环境变量读，
+不接受命令行参数（会留在 shell 历史里）：
+
+```bash
+export RELATIONSHIP_DEVICE=caldav
+export RELATIONSHIP_CALDAV_URL=https://host/remote.php/dav/calendars/user/personal/
+export RELATIONSHIP_CALDAV_USER=user
+export RELATIONSHIP_CALDAV_PASSWORD='应用专用密码'
+npm run execute
+npm run reconcile
+
+# 也可以只给某一次命令：
+npm run execute -- --device caldav --caldav-url http://127.0.0.1:5232/me/personal/ --caldav-user me
+```
+
 ## 目录
 
 ```
@@ -122,7 +137,9 @@ src/
   runtime/outbox.ts      出站队列：confirmed → submitted → executed/failed，幂等 + 可重试失败
   runtime/reconcile.ts   崩溃对账：处理"设备可能执行了、系统不知道"的卡
   runtime/device.ts      设备适配层（mock 支持 partial / 冲突类失败 / 幂等查询）
+  runtime/ics-render.ts  日程和提醒的 VEVENT 渲染（两个日历设备共用）
   runtime/ics-file-device.ts  文件日历设备：把日程和提醒写成可导入的 .ics
+  runtime/caldav-device.ts    CalDAV 设备：条件 PUT 到日历服务，GET 做幂等查询
   runtime/create-device.ts    按 --device / RELATIONSHIP_DEVICE 选设备
   runtime/survey.ts      问卷 / 确认 / 审核的 CLI 与脚本实现
   ingest/evidence.ts     证据入库：哈希去重、按类型 TTL、入库即生成摘要
@@ -181,6 +198,7 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 - [x] 人工接管：护栏中断 / 设备失败时把会话交回人手里
 - [x] 崩溃对账：`submitted` 且无回执的卡，按设备幂等查询给出采纳 / 回退 / 升级三种结局
 - [x] 真实设备第一版：文件日历，日程和提醒写成 `.ics`，幂等查询靠文件是否存在，`npm run device-check` 验收
+- [x] 真实设备第二版：CalDAV，条件 PUT（`If-None-Match: *`）保证同一 requestId 不重复写入，GET 做幂等查询
 - [x] 会话用量统计（token / 成本）
 - [x] 运行护栏：轮次 / 单轮次数 / 连续失败 / 重复调用 / 墙钟
 - [x] 上下文压缩接进主链路，压缩记录带 generation CAS
@@ -192,7 +210,7 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 
 ## 未做（M2 以后）
 
-- 真实设备只做了文件日历：CalDAV（静默写入日历服务）和 IM 通道（企业微信 / 钉钉）还没接
+- 真实设备做了文件日历和 CalDAV：IM 通道（企业微信 / 钉钉）还没接；CalDAV 只在进程内模拟服务上验过，真实服务（Radicale / Nextcloud / iCloud）要手动跑一次
 - 截图 OCR 没有标注集，准确率只在手工跑过的几张图上确认；`confidence` 只打印，不参与判定
 - 复杂重复规则（`BYSETPOS` / `BYMONTH` / `BYWEEKNO` 等）不展开，只导入首个实例并在正文写明原因
 - LLM 摘要压缩（现在是结构化裁剪 + 记账）
