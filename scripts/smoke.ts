@@ -286,12 +286,18 @@ async function main(): Promise<void> {
     content: "【OCR】张三：周六下午在国贸那边聚一下？我四点还得走。",
     sourceRef: "screenshots/test.png",
   };
-  const firstShot = await ingestEvidence(store, shot, new Date("2026-10-31T12:00:00+08:00"));
+  const shotIngestAt = new Date("2026-10-31T12:00:00+08:00");
+  const firstShot = await ingestEvidence(store, shot, shotIngestAt);
   check("首次导入新增", firstShot.created === true);
-  check("截图按 24h 计算有效期", firstShot.expiresAt?.startsWith("2026-10-31") === true, firstShot.expiresAt);
+  check(
+    "截图保留期 = 入库时间 + 24h",
+    firstShot.expiresAt ===
+      new Date(shotIngestAt.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    firstShot.expiresAt,
+  );
   check("入库时就把摘要生成好", Boolean(firstShot.evidence.summary), firstShot.evidence.summary);
 
-  const secondShot = await ingestEvidence(store, shot, new Date("2026-10-31T12:00:00+08:00"));
+  const secondShot = await ingestEvidence(store, shot, shotIngestAt);
   check(
     "同一份材料重复导入被去重",
     secondShot.created === false && secondShot.evidence.evidenceId === firstShot.evidence.evidenceId,
@@ -1177,6 +1183,27 @@ async function main(): Promise<void> {
   }
   check("待确认证据对模型不可读", pendingError.includes("尚未通过人工确认"), pendingError);
 
+  // 保留期从入库时间算：补录一张很旧的截图，导入之后仍然能读正文
+  const oldShot = await ingestEvidence(
+    ingestStore,
+    {
+      personId: "p_001",
+      kind: "screenshot",
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      title: "旧截图补录",
+      content: "三个月前的截图补录进来，正文仍然可读",
+      sourceRef: "smoke-old.png",
+      contentHash: "sha256:smoke-old",
+    },
+    ingestNow,
+  );
+  check(
+    "保留期从入库时间起算",
+    oldShot.expiresAt === new Date(ingestNow.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    oldShot.expiresAt,
+  );
+  check("补录旧材料不会一入库就过期", ingestStore.isExpired(oldShot.evidence, ingestNow) === false);
+
   // 过期证据：快照、检索、按 ID 读取三条路都不能把正文漏出去
   const tail = "尾部暗号";
   const expiredShot = await ingestEvidence(
@@ -1184,15 +1211,17 @@ async function main(): Promise<void> {
     {
       personId: "p_001",
       kind: "screenshot",
-      capturedAt: "2026-01-01T00:00:00.000Z",
+      capturedAt: "2026-11-01T00:00:00.000Z",
       title: "过期截图",
       content: `${"很长的正文。".repeat(20)}${tail}`,
       sourceRef: "smoke-expired.png",
       contentHash: "sha256:smoke-expired",
+      ttlMs: 1000,
     },
-    ingestNow,
+    // 一小时前入库、只保留 1 秒，现在必然已过期
+    new Date(Date.now() - 60 * 60 * 1000),
   );
-  const expiredSnapshot = await buildMemorySnapshot(ingestStore, "p_001", ingestNow);
+  const expiredSnapshot = await buildMemorySnapshot(ingestStore, "p_001");
   const expiredEntry = expiredSnapshot.evidence.find(
     (e) => e.evidenceId === expiredShot.evidence.evidenceId,
   );

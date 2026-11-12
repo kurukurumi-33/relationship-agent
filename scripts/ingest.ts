@@ -142,7 +142,7 @@ async function runImage(
   const expiresAt = result.evidence.expiresAt;
   if (expiresAt && new Date(expiresAt) <= now) {
     console.log(
-      `  注意：保留期从材料产生时间算起，这条已经过期（${expiresAt}）。` +
+      `  注意：这条材料入库时就已经过期（${expiresAt}）。` +
         "快照和工具里只会看到摘要，拿不到正文。",
     );
   }

@@ -61,10 +61,11 @@ export async function ingestEvidence(
   const contentHash = input.contentHash ?? contentHashOf(input);
   const ttlMs = input.ttlMs ?? DEFAULT_TTL_MS[input.kind];
 
-  // 过期时间从"材料产生的时间"算，不是从入库时间算。
-  // 否则补录一张三个月前的截图，它会从今天起再活 24 小时——那不是保留策略，是漏洞。
+  // 过期时间从入库时间算。按拍摄时间算的话，补录一张上周的截图会一入库就过期，
+  // OCR 出来的正文当场作废，等于白跑一次识别。代价是反复重新导入可以续期，
+  // 单用户场景下这就是用户自己的显式动作，可以接受。
   const expiresAt =
-    ttlMs && ttlMs > 0 ? new Date(new Date(input.capturedAt).getTime() + ttlMs).toISOString() : undefined;
+    ttlMs && ttlMs > 0 ? new Date(now.getTime() + ttlMs).toISOString() : undefined;
 
   const result = await store.importEvidence({
     evidenceId: input.evidenceId,
