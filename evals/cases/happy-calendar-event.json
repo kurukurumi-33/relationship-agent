@@ -1,0 +1,35 @@
+{
+  "id": "happy-calendar-event",
+  "title": "正常路径：读日历证据 → 建日历事件 → 执行",
+  "tags": ["happy"],
+  "goal": "把 11 月 2 日的项目复盘会加到我的日历里。",
+  "personId": "p_001",
+  "script": [
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_002" } } },
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "calendar_event",
+          "title": "Q4 项目复盘会",
+          "payload": { "at": "2026-11-02T10:00:00+08:00" },
+          "reason": "ev_002 记录了 11 月 2 日 10:00-11:30 的复盘会",
+          "sourceIds": ["ev_002"]
+        }
+      }
+    },
+    { "text": "已建好复盘会的日程，等你确认。" }
+  ],
+  "expect": {
+    "cards.total": 1,
+    "cards.executed": 1,
+    "handoffs": 0,
+    "tools.called": ["get_evidence_text", "propose_action"],
+    "tools.maxCalls": 2
+  },
+  "expectReal": {
+    "tools.maxCalls": 6,
+    "cards.total": null,
+    "cards.executed": null
+  }
+}

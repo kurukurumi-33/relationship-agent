@@ -1,0 +1,20 @@
+{
+  "id": "guard-consecutive-failures",
+  "title": "护栏：连续工具失败达到上限时中断并转人工",
+  "tags": ["guard"],
+  "realModel": false,
+  "goal": "把张三的三条证据都读出来。",
+  "personId": "p_001",
+  "script": [
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_901" } } },
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_902" } } },
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_903" } } },
+    { "text": "连续读不到，先停下来。" }
+  ],
+  "expect": {
+    "tools.total": 3,
+    "tools.errors": 3,
+    "cards.total": 0,
+    "handoffs": 1
+  }
+}

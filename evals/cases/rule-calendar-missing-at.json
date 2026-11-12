@@ -1,0 +1,29 @@
+{
+  "id": "rule-calendar-missing-at",
+  "title": "参数规则：日历事件缺时间被拒",
+  "tags": ["guard"],
+  "realModel": false,
+  "goal": "把项目复盘会加到日历里。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "calendar_event",
+          "title": "项目复盘会",
+          "payload": { "location": "三楼会议室" },
+          "reason": "ev_002 里有复盘会安排",
+          "sourceIds": ["ev_002"]
+        }
+      }
+    },
+    { "text": "缺时间，先补上再建。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "guard.blocked": 1,
+    "tools.total": 1
+  }
+}

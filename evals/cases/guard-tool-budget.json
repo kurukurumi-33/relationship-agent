@@ -1,0 +1,20 @@
+{
+  "id": "guard-tool-budget",
+  "title": "护栏：工具调用总次数超限时中断并转人工",
+  "tags": ["guard"],
+  "realModel": false,
+  "goal": "把张三所有资料都翻一遍。",
+  "personId": "p_001",
+  "budget": { "maxToolCalls": 2 },
+  "script": [
+    { "toolCall": { "name": "search_evidence", "arguments": { "query": "复查" } } },
+    { "toolCall": { "name": "search_evidence", "arguments": { "query": "会议" } } },
+    { "toolCall": { "name": "search_evidence", "arguments": { "query": "戒烟" } } },
+    { "text": "查到这里先停一下。" }
+  ],
+  "expect": {
+    "tools.total": 3,
+    "cards.total": 0,
+    "handoffs": 1
+  }
+}

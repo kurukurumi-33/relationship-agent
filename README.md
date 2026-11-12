@@ -45,6 +45,7 @@ npm run ocr-check -- --image D:\path\to\chat.png
 npm run eval
 npm run eval -- --tag boundary
 npm run eval -- --update-baseline
+npm run eval:real                      # 真模型跑批，报告写 evals/report-real.json
 
 # 把一次真实会话回收成用例草稿（数据闭环入口）
 npm run collect -- --session sess_xxx
@@ -203,7 +204,7 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 - [x] 运行护栏：轮次 / 单轮次数 / 连续失败 / 重复调用 / 墙钟
 - [x] 上下文压缩接进主链路，压缩记录带 generation CAS
 - [x] 评测第 1 层：边界审计 15 个用例，拦截率 15/15
-- [x] 评测中心：用例是数据、分维度指标、基线 + 回归判定（8 条用例，可扩展）
+- [x] 评测中心：用例是数据、分维度指标、基线 + 回归判定（33 条用例，可扩展）
 - [x] 数据闭环：`collect` 把真实会话回收成用例草稿
 - [x] 评测第 2 层：轨迹回放（request / session / person）
 - [x] 评测第 3 层接口：规则 Judge + `createLlmJudge` 占位

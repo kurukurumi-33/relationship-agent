@@ -1,0 +1,29 @@
+{
+  "id": "rule-draft-empty",
+  "title": "参数规则：空白草稿消息被拒",
+  "tags": ["guard"],
+  "realModel": false,
+  "goal": "帮我给张三发条消息。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "draft_message",
+          "title": "给张三发消息",
+          "payload": { "text": "   " },
+          "reason": "ev_001 里他说下午两点后都行",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    { "text": "正文是空的，这条草稿没有意义。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "guard.blocked": 1,
+    "tools.total": 1
+  }
+}

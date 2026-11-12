@@ -81,20 +81,26 @@ evals/cases/*.json
 
 可选字段：`insight`（启用洞察 Agent，script 后半段是它的回合）、`device`（设备失败/部分成功）、`budget`（覆盖护栏预算）、`realModel`（默认 true，标 false 的用例在 `--real` 下跳过）、`expectReal`（真模型下覆盖 `expect` 的对应项）。
 
-## 5. 现有 8 条覆盖了什么
+## 5. 现有 33 条覆盖了什么
 
-| 用例 | 维度 | 验证的事 |
-|---|---|---|
-| happy-reminder | happy | 读证据 → 提案 → 确认 → 执行，整条链走通 |
-| boundary-cross-person | boundary | 跨人读取被拒，且回答里没有泄漏 |
-| boundary-forged-source | boundary | 编造证据的提案被拒，不产生行动卡 |
-| memory-temp-instruction | memory/boundary | 临时指令被洞察拒绝，长期记忆条数不变 |
-| resilience-device-fail | resilience | 设备失败 → 卡片 failed + 人工接管 |
-| guard-repeat-call | guard | 同参重复调用第 4 次被拦 |
-| rule-reject-then-correct | guard/resilience | 参数规则拒绝坏时间，模型改对后提案落地 |
-| rule-ask-single-option | guard | 只有一个选项的追问被拒 |
+| 维度 | 条数 | 用例 | 验证的事 |
+|---|---|---|---|
+| happy | 7 | `happy-reminder`、`happy-calendar-event`、`happy-draft-message`、`happy-multi-evidence`、`happy-search-then-read`、`happy-ask-then-act`、`memory-approve-stable-fact` | 读证据 → 提案 → 确认 → 执行整链；三种动作类型；两条证据互相矛盾时的提案 |
+| boundary | 9 | `boundary-cross-person`、`boundary-forged-source`、`boundary-cross-person-action`、`boundary-cross-person-memory`、`boundary-missing-evidence-id`、`ask-unknown-person`、`refuse-no-evidence`、`memory-temp-instruction`、`memory-insight-rejects-unsupported` | 跨人读取、跨人引用、不存在的证据 id、编造依据、临时指令进记忆 |
+| guard | 11 | `guard-repeat-call`、`guard-tool-budget`、`guard-consecutive-failures`，以及 8 条参数规则用例 | 重复调用、工具总次数超限、连续失败中断；标题空/超长、草稿空、日历缺时间、追问 id 重复 / 单选项、检索词为空 |
+| ask | 5 | `ask-missing-time`、`ask-two-questions`、`ask-unknown-person`、`happy-ask-then-act`、`refuse-no-evidence` | 信息不足时先问、一次问两个问题、没有这个人时不编造、问完再提案 |
+| memory | 5 | `memory-temp-instruction`、`memory-approve-stable-fact`、`memory-insight-rejects-unsupported`、`memory-insight-self-propose`、`boundary-cross-person-memory` | 洞察 Agent 的拒绝、通过、自提三条路径；记忆净增靠 `memory.itemsDelta` 判定 |
+| resilience | 4 | `resilience-device-fail`、`resilience-partial-receipt`、`resilience-two-actions-one-fails`、`rule-reject-then-correct` | 设备失败转人工、部分成功不算失败、一张失败不影响另一张、参数被拦后改对重提 |
 
-**明确的空档**：没有多轮对话用例、没有并发用例（并发在 `audit.ts` 里是代码级验证）、没有需要人工标注集的指标（比如记忆命中率）。
+一条用例可以带多个 tag，所以各维度条数加起来大于 33。
+
+**仍然空着的**：
+
+- 多轮追问只到"一次追问、拿到答案后继续"这一层，没有真正跨越多个会话的跟踪用例。
+- 并发没有用例（`smoke` 第 13 段和 `npm run concurrency` 在代码层验证）。
+- 记忆命中率、语义正确性需要人工标注集，现在没有；LLM Judge 也只有接口。
+- `tools.total` 数的是模型**提出**的工具调用，被规则或护栏拦下的也算在内；要区分"执行了几次"得看用例里的 `tools.errors` 和 `guard.blocked`。
+- 真模型的比率基线（越界率、追问率、提案落地率）还没有成批跑，见第 5.1 节。
 
 ### 5.1 脚本模式和真模型模式
 
@@ -248,7 +254,7 @@ A 的七项混了三种不同层级的东西：
 | RAG 检索 | — | 本项目没有检索层，不适用 |
 | 证据 | 结果轴（语义）+ 轨迹轴（来源） | sourceIds 校验、groundedness、访问审计 |
 | Agent 过程 | 轨迹轴 | `tools.called` / `tools.maxCalls` / `npm run trace` |
-| 稳定性与异常 | 轨迹轴 | 设备失败→接管、护栏拦截、42 项 smoke |
+| 稳定性与异常 | 轨迹轴 | 设备失败→接管、护栏拦截、216 项 smoke |
 | 成本效率 | 代价轴 | tokens / 耗时 / 成本 |
 | 安全检验 | 结果轴 | 15 条 audit + boundary 用例 |
 
@@ -256,18 +262,20 @@ A 的七项混了三种不同层级的东西：
 
 ```
 【结果】
-  通过率      6/6 = 100.0%
-  任务完成率  1/1 = 100.0%   （只算期望有真实副作用的用例）
-  分维度      boundary 3/3  guard 1/1  happy 1/1  memory 1/1  resilience 1/1
+  通过率      33/33 = 100.0%
+  任务完成率  11/11 = 100.0%   （只算期望有真实副作用的用例）
+  分维度      ask 5/5  boundary 9/9  guard 11/11  happy 7/7  memory 5/5  resilience 4/4
 【轨迹】
-  平均工具调用 1.7 次/用例
-  工具报错     3 次
-  护栏拦截     1 次
+  平均工具调用 1.5 次/用例
+  工具报错     19 次
+  护栏拦截     10 次
 【代价】
-  平均用量     2756 tokens/用例
-  平均耗时     24ms/用例
+  平均用量     2845 tokens/用例（合计 93871）
+  平均耗时     21ms/用例
   总成本       0.0000
 ```
+
+数字来自 2026-11-12 的全量脚本运行。脚本模式下这三张表是回归护栏，不是模型效果；模型效果看第 5.1 节的 `--real` 跑批。
 
 ### 这三轴现在还缺什么
 
@@ -278,3 +286,70 @@ A 的七项混了三种不同层级的东西：
 | 轨迹 | 冗余步数 | `tools.maxCalls` 能抓上限，但算不出"最优路径是几步" |
 | 轨迹 | 中断恢复的成功率 | smoke 里验证了注入逻辑，但没有跑"崩→恢复→完成"的整链用例 |
 | 代价 | 成本基线 | 现在全是 0（faux provider 不计费），接真模型才有意义 |
+
+## 9. 真模型跑批手册（M6）
+
+脚本集已经扩到 33 条，下一步是用真模型跑出比率。这一节是操作说明和判读口径，命令都在 `D:\relationship-agent` 下执行。
+
+### 9.1 跑之前
+
+模型配置二选一，key 只留在环境变量或 `.env` 里，不要写进命令行参数：
+
+```bash
+# DeepSeek（默认，内置 provider）
+export DEEPSEEK_API_KEY=...
+
+# 或者任何 OpenAI 兼容端点（百炼、vLLM、LM Studio）
+export RELATIONSHIP_MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+export RELATIONSHIP_MODEL_API_KEY=...
+export RELATIONSHIP_MODEL_ID=qwen-plus
+```
+
+先确认配置能被解析：`npm run eval:real -- --limit 1` 会在开头打印 `真实模型: ...`，跑一条就停。不要在日志或命令行里带 key。
+
+脚本模式必须先是 33/33，基线无回归。真模型跑出来的失败才有可能是模型的问题，而不是系统坏了。
+
+### 9.2 三档跑法
+
+```bash
+npm run eval -- --real --limit 2        # 试水：两条，几分钱，先看配置通不通
+npm run eval -- --real --tag boundary   # 单维度：看越界和追问
+npm run eval:real                        # 全量 33 条
+```
+
+`realModel: false` 的用例在真模型下自动跳过，主要是靠"模型按剧本犯错"才能成立的参数规则和重复调用用例。跳过名单会打印在运行开头。
+
+### 9.3 看哪几个数
+
+| 数 | 在哪 | 怎么判读 |
+|---|---|---|
+| 通过率与分维度 | 结果区 | 脚本基线不适用；看不同模型、不同批次之间是否稳定 |
+| 越界尝试 | 【真模型】区 | `tools.denied` / 总工具调用。跨人读取和跨人引用才计入，空 sourceIds 不算 |
+| 追问次数 | 【真模型】区 | `ask_user` 总次数。太高说明什么都不敢做，太低说明该问不问 |
+| 行动卡 | 【真模型】区 | 提出多少张、执行成功多少张。提出 0 张不等于通过，要看用例期望 |
+| 单条失败原因 | 报告 `results[].failures` 和 `text` | 先看模型说了什么，再判断是系统问题还是模型选择 |
+
+单条用例的结果会抖。上一轮 `happy-reminder` 连跑三次，一次只追问不提案、一次提案成功走了 5 次工具调用。所以比率至少跑三轮再报，单次只能看方向。
+
+### 9.4 两个模型对比
+
+`evals/report-real.json` 每次全量跑都会被覆盖，跑完一个模型先另存：
+
+```bash
+npm run eval:real
+cp evals/report-real.json evals/report-real.deepseek.json
+cp evals/report-real.md   evals/report-real.deepseek.md
+
+# 换成 qwen 的配置后再跑
+npm run eval:real
+cp evals/report-real.json evals/report-real.qwen.json
+```
+
+对比时只看同口径的四个数：通过率、越界尝试、追问次数、执行成功/提出。不要去比单条用例的通过与否，两边路径长度不同，`tools.maxCalls` 这类断言在真模型下本来就容易假失败，`expectReal` 已经放宽了一部分，没放宽的以报告里的 `failures` 为准。
+
+### 9.5 M6 还缺什么
+
+- 语义正确性没有判定：33 条全是结构断言，回答"说得对不对"要接 LLM Judge。接口在 `src/eval/judge.ts`，`createLlmJudge` 还是占位。
+- 记忆命中率需要人工标注集：哪些问题应该召回哪条记忆，得人来标。
+- 多轮跟踪、并发这两类没有用例。并发在 `smoke` 和 `npm run concurrency` 里做了代码级验证，但没有评测入口。
+- 真模型跑批结果还没有沉淀成基线。真模型天然会抖，基线的做法应该是"连续三轮的区间"，不是某一次的通过名单。

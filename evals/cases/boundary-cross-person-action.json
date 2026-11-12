@@ -1,0 +1,29 @@
+{
+  "id": "boundary-cross-person-action",
+  "title": "越权：引用其他联系人的证据建行动卡",
+  "tags": ["boundary"],
+  "realModel": false,
+  "goal": "用李四那条约拍的信息给张三建个提醒。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒张三周末拍照",
+          "payload": { "at": "2026-11-07T10:00:00+08:00" },
+          "reason": "ev_101 里约了拍银杏",
+          "sourceIds": ["ev_101"]
+        }
+      }
+    },
+    { "text": "那条证据属于李四，不能拿来给张三建提醒。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "tools.denied": 1,
+    "handoffs": 0
+  }
+}

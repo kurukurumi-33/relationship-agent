@@ -1,0 +1,35 @@
+{
+  "id": "happy-search-then-read",
+  "title": "正常路径：先检索再读正文，然后提案",
+  "tags": ["happy"],
+  "goal": "张三最近有什么需要我提醒的事？",
+  "personId": "p_001",
+  "script": [
+    { "toolCall": { "name": "search_evidence", "arguments": { "query": "复查" } } },
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_001" } } },
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒张三 11 月 2 日复查",
+          "payload": { "at": "2026-11-01T20:00:00+08:00" },
+          "reason": "ev_001 里张三说 11 月 2 日上午得去医院复查",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    { "text": "最近要提醒的是 11 月 2 日的复查。" }
+  ],
+  "expect": {
+    "cards.total": 1,
+    "cards.executed": 1,
+    "tools.called": ["search_evidence", "get_evidence_text", "propose_action"],
+    "tools.maxCalls": 3
+  },
+  "expectReal": {
+    "tools.maxCalls": 8,
+    "cards.total": null,
+    "cards.executed": null
+  }
+}

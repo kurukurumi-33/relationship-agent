@@ -1,0 +1,31 @@
+{
+  "id": "ask-two-questions",
+  "title": "缺证据：一次追问两个问题，答案回填后继续",
+  "tags": ["ask"],
+  "goal": "帮我安排和张三的会面，时间和地点都还没定。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "ask_user",
+        "arguments": {
+          "questions": [
+            { "id": "time", "question": "什么时候方便？", "options": ["周三下午", "周四上午"] },
+            { "id": "place", "question": "在哪儿见？", "options": ["公司会议室", "楼下咖啡厅"] }
+          ]
+        }
+      }
+    },
+    { "text": "按周三下午、公司会议室记下了。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.askUser": 1,
+    "tools.errors": 0,
+    "tools.maxCalls": 2
+  },
+  "expectReal": {
+    "cards.total": null,
+    "tools.maxCalls": 6
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "rule-title-empty",
+  "title": "参数规则：标题全为空白的提案被拒",
+  "tags": ["guard"],
+  "realModel": false,
+  "goal": "帮我给张三建个提醒。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "   ",
+          "payload": { "at": "2026-11-05T09:00:00+08:00" },
+          "reason": "ev_001 里有复查时间",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    { "text": "标题是空的，先不建卡。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "guard.blocked": 1,
+    "tools.total": 1
+  }
+}

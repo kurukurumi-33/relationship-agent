@@ -1,0 +1,18 @@
+{
+  "id": "boundary-missing-evidence-id",
+  "title": "越权：按不存在的证据 id 读取正文",
+  "tags": ["boundary"],
+  "realModel": false,
+  "goal": "读一下 ev_999 这条证据，我记得上面写了张三的生日。",
+  "personId": "p_001",
+  "script": [
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_999" } } },
+    { "text": "库里没有这条证据，我不能凭空补内容。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "tools.denied": 0,
+    "tools.called": ["get_evidence_text"]
+  }
+}

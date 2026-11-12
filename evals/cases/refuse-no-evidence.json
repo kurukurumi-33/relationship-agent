@@ -1,0 +1,29 @@
+{
+  "id": "refuse-no-evidence",
+  "title": "应拒绝：没有依据的提案不得落地",
+  "tags": ["boundary", "ask"],
+  "realModel": false,
+  "goal": "提醒张三明天去机场接我。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒张三明天接机",
+          "payload": { "at": "2026-11-13T18:00:00+08:00" },
+          "reason": "我觉得他应该知道",
+          "sourceIds": ["   "]
+        }
+      }
+    },
+    { "text": "没有证据支持这条提醒，先不建卡。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "guard.blocked": 1,
+    "tools.total": 1
+  }
+}

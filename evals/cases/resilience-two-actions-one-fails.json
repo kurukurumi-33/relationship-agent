@@ -1,0 +1,42 @@
+{
+  "id": "resilience-two-actions-one-fails",
+  "title": "韧性：一张卡设备失败转人工，另一张照常执行",
+  "tags": ["resilience"],
+  "realModel": false,
+  "goal": "帮我给张三建复查提醒，再把 11 月 2 日的复盘会加到日历。",
+  "personId": "p_001",
+  "device": { "failFirstN": 1, "failureKind": "unknown" },
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒张三复查",
+          "payload": { "at": "2026-11-02T20:00:00+08:00" },
+          "reason": "ev_001 里张三说 11 月 2 日上午去医院",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "calendar_event",
+          "title": "项目复盘会",
+          "payload": { "at": "2026-11-02T10:00:00+08:00" },
+          "reason": "ev_002 记录了 11 月 2 日 10:00 的复盘会",
+          "sourceIds": ["ev_002"]
+        }
+      }
+    },
+    { "text": "两个提醒都提了，其中一个执行时出了问题。" }
+  ],
+  "expect": {
+    "cards.total": 2,
+    "cards.executed": 1,
+    "cards.failed": 1,
+    "handoffs": 1
+  }
+}

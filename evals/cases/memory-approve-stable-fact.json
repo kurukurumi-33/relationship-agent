@@ -1,0 +1,42 @@
+{
+  "id": "memory-approve-stable-fact",
+  "title": "记忆：有证据的稳定事实通过审核并写入",
+  "tags": ["memory", "happy"],
+  "goal": "张三在戒烟，帮我把这件事记进长期记忆。",
+  "personId": "p_001",
+  "insight": true,
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_memory",
+        "arguments": {
+          "text": "截至 2026 年 9 月，张三已经戒烟三个月。",
+          "sourceIds": ["ev_003"]
+        }
+      }
+    },
+    { "text": "这条候选有 ev_003 支撑，交给审核。" },
+    {
+      "toolCall": {
+        "name": "review_candidates",
+        "arguments": {
+          "candidateIds": ["*"],
+          "decision": "approve",
+          "reason": "ev_003 明确记录了他戒烟三个月，属于稳定事实"
+        }
+      }
+    },
+    { "text": "审核通过。" }
+  ],
+  "expect": {
+    "candidates.approved": 1,
+    "candidates.rejected": 0,
+    "memory.itemsDelta": 1,
+    "cards.total": 0,
+    "tools.called": ["propose_memory"]
+  },
+  "expectReal": {
+    "candidates.approved": null,
+    "memory.itemsDelta": null
+  }
+}

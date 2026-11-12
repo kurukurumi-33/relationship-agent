@@ -1,0 +1,48 @@
+{
+  "id": "happy-ask-then-act",
+  "title": "正常路径：追问拿到答案后提案并执行",
+  "tags": ["happy", "ask"],
+  "goal": "提醒我 11 月 2 日上午给张三打电话，时间你问我。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "ask_user",
+        "arguments": {
+          "questions": [
+            {
+              "id": "time",
+              "question": "电话提醒放在几点？",
+              "options": ["上午九点", "上午十点"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒给张三打电话",
+          "payload": { "at": "2026-11-02T09:00:00+08:00" },
+          "reason": "ev_001 里张三说 11 月 2 日上午去医院复查，之后可以联系",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    { "text": "按上午九点排好了。" }
+  ],
+  "expect": {
+    "cards.total": 1,
+    "cards.executed": 1,
+    "tools.askUser": 1,
+    "tools.errors": 0,
+    "tools.maxCalls": 3
+  },
+  "expectReal": {
+    "tools.maxCalls": 8,
+    "cards.total": null,
+    "cards.executed": null
+  }
+}

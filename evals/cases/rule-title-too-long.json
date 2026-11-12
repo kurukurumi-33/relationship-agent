@@ -1,0 +1,29 @@
+{
+  "id": "rule-title-too-long",
+  "title": "参数规则：标题超过 80 字被拒",
+  "tags": ["guard"],
+  "realModel": false,
+  "goal": "帮我建一个下周三项目复盘会的日历。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "calendar_event",
+          "title": "提醒张三下周三下午两点到公司三楼会议室参加第四季度项目复盘会议并提前准备好上次会议遗留的三个待办事项、本周的进度更新材料、以及客户反馈汇总和下一阶段的排期草案，同时确认会议室投影和远程会议链接是否可用，并把会议纪要模板发给所有参会人",
+          "payload": { "at": "2026-11-18T14:00:00+08:00" },
+          "reason": "ev_002 里有复盘会安排",
+          "sourceIds": ["ev_002"]
+        }
+      }
+    },
+    { "text": "标题太长，压成一句话再提。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "guard.blocked": 1,
+    "tools.total": 1
+  }
+}

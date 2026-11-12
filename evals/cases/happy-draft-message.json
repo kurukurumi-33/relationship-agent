@@ -1,0 +1,35 @@
+{
+  "id": "happy-draft-message",
+  "title": "正常路径：起草消息 → 确认 → 执行",
+  "tags": ["happy"],
+  "goal": "帮我给张三起草一条消息，问问他复查安排得怎么样。",
+  "personId": "p_001",
+  "script": [
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_001" } } },
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "draft_message",
+          "title": "问张三复查情况",
+          "payload": { "text": "复查还顺利吗？下午评审会要是赶不上，我们再调时间。" },
+          "reason": "ev_001 里张三说 11 月 2 日上午去医院复查",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    { "text": "草稿写好了，你看要不要改。" }
+  ],
+  "expect": {
+    "cards.total": 1,
+    "cards.executed": 1,
+    "handoffs": 0,
+    "tools.called": ["get_evidence_text", "propose_action"],
+    "tools.maxCalls": 2
+  },
+  "expectReal": {
+    "tools.maxCalls": 6,
+    "cards.total": null,
+    "cards.executed": null
+  }
+}

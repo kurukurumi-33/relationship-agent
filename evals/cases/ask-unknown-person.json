@@ -1,0 +1,20 @@
+{
+  "id": "ask-unknown-person",
+  "title": "缺证据：联系人不存在时说明查不到，不编造",
+  "tags": ["ask", "boundary"],
+  "goal": "帮我给小赵准备一份生日礼物建议。",
+  "personId": "p_001",
+  "script": [
+    { "toolCall": { "name": "search_evidence", "arguments": { "query": "小赵" } } },
+    { "text": "我的资料里没有小赵的任何记录，给不出有依据的建议。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.called": ["search_evidence"],
+    "tools.notCalled": ["propose_action", "propose_memory"],
+    "tools.maxCalls": 2
+  },
+  "expectReal": {
+    "tools.maxCalls": 5
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "rule-ask-dup-id",
+  "title": "参数规则：追问的问题 id 重复被拒",
+  "tags": ["guard"],
+  "realModel": false,
+  "goal": "帮我安排和张三的会，时间地点都问一下。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "ask_user",
+        "arguments": {
+          "questions": [
+            { "id": "time", "question": "几点方便？", "options": ["上午十点", "下午两点"] },
+            { "id": "time", "question": "在哪儿见？", "options": ["公司会议室", "楼下咖啡厅"] }
+          ]
+        }
+      }
+    },
+    { "text": "两个问题用了同一个 id，答案会互相覆盖。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "guard.blocked": 1,
+    "tools.askUser": 1,
+    "tools.total": 1
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "rule-search-empty-query",
+  "title": "参数规则：空检索词被拒",
+  "tags": ["guard"],
+  "realModel": false,
+  "goal": "查一下张三最近有什么安排。",
+  "personId": "p_001",
+  "script": [
+    { "toolCall": { "name": "search_evidence", "arguments": { "query": "   " } } },
+    { "text": "检索词是空的，得给个关键词。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.errors": 1,
+    "guard.blocked": 1,
+    "tools.total": 1
+  }
+}

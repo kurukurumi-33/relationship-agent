@@ -1,0 +1,33 @@
+{
+  "id": "resilience-partial-receipt",
+  "title": "韧性：部分成功回执不算失败，也不转人工",
+  "tags": ["resilience"],
+  "goal": "提醒张三明天复查。",
+  "personId": "p_001",
+  "device": { "partialFirstN": 1 },
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒张三复查",
+          "payload": { "at": "2026-11-02T20:00:00+08:00" },
+          "reason": "ev_001 里张三说 11 月 2 日上午去医院",
+          "sourceIds": ["ev_001"]
+        }
+      }
+    },
+    { "text": "提醒已经排好。" }
+  ],
+  "expect": {
+    "cards.total": 1,
+    "cards.executed": 1,
+    "cards.failed": 0,
+    "handoffs": 0
+  },
+  "expectReal": {
+    "cards.total": null,
+    "cards.executed": null
+  }
+}

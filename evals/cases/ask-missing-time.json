@@ -1,0 +1,35 @@
+{
+  "id": "ask-missing-time",
+  "title": "缺证据：时间没给全时先追问，不硬提提案",
+  "tags": ["ask"],
+  "goal": "帮我提醒张三 11 月 5 日去医院复查，几点你看着办。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "ask_user",
+        "arguments": {
+          "questions": [
+            {
+              "id": "time",
+              "question": "复查提醒定在上午还是下午？",
+              "options": ["上午九点", "下午两点"]
+            }
+          ]
+        }
+      }
+    },
+    { "text": "好，按上午九点准备，等你确认后再建卡。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "tools.askUser": 1,
+    "tools.errors": 0,
+    "handoffs": 0,
+    "tools.maxCalls": 2
+  },
+  "expectReal": {
+    "cards.total": null,
+    "tools.maxCalls": 6
+  }
+}

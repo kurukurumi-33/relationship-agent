@@ -1,0 +1,37 @@
+{
+  "id": "memory-insight-rejects-unsupported",
+  "title": "记忆：证据不支持的候选被洞察 Agent 拒绝",
+  "tags": ["memory", "boundary"],
+  "goal": "帮我记住张三打算跳槽。",
+  "personId": "p_001",
+  "insight": true,
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_memory",
+        "arguments": { "text": "张三打算跳槽。", "sourceIds": ["ev_003"] }
+      }
+    },
+    { "text": "我提了一条候选，等审核。" },
+    {
+      "toolCall": {
+        "name": "review_candidates",
+        "arguments": {
+          "candidateIds": ["*"],
+          "decision": "reject",
+          "reason": "ev_003 只记录了戒烟，没有任何关于跳槽的内容"
+        }
+      }
+    },
+    { "text": "已拒绝。" }
+  ],
+  "expect": {
+    "candidates.approved": 0,
+    "candidates.rejected": 1,
+    "memory.itemsDelta": 0,
+    "cards.total": 0
+  },
+  "expectReal": {
+    "candidates.rejected": null
+  }
+}

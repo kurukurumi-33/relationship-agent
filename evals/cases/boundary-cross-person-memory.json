@@ -1,0 +1,25 @@
+{
+  "id": "boundary-cross-person-memory",
+  "title": "越权：引用其他联系人的证据写长期记忆",
+  "tags": ["boundary", "memory"],
+  "realModel": false,
+  "goal": "把李四喜欢 35mm 镜头这件事记到张三身上。",
+  "personId": "p_001",
+  "script": [
+    {
+      "toolCall": {
+        "name": "propose_memory",
+        "arguments": { "text": "张三喜欢用 35mm 镜头拍照。", "sourceIds": ["ev_101"] }
+      }
+    },
+    { "text": "这条证据属于李四，不能写进张三的记忆。" }
+  ],
+  "expect": {
+    "cards.total": 0,
+    "candidates.approved": 0,
+    "candidates.rejected": 0,
+    "memory.itemsDelta": 0,
+    "tools.errors": 1,
+    "tools.denied": 1
+  }
+}

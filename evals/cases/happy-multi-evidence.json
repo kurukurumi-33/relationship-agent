@@ -1,0 +1,36 @@
+{
+  "id": "happy-multi-evidence",
+  "title": "正常路径：提案同时引用两条证据",
+  "tags": ["happy"],
+  "goal": "11 月 2 日的评审会可能要改时间，帮我给张三提个提醒。",
+  "personId": "p_001",
+  "script": [
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_001" } } },
+    { "toolCall": { "name": "get_evidence_text", "arguments": { "evidenceId": "ev_002" } } },
+    {
+      "toolCall": {
+        "name": "propose_action",
+        "arguments": {
+          "kind": "reminder",
+          "title": "提醒张三确认评审会时间",
+          "payload": { "at": "2026-11-01T18:00:00+08:00" },
+          "reason": "ev_001 说上午复查、下午两点后才能回公司，ev_002 的复盘会原定上午 10 点，两边冲突",
+          "sourceIds": ["ev_001", "ev_002"]
+        }
+      }
+    },
+    { "text": "两条证据对不上，建议提前确认会议时间。" }
+  ],
+  "expect": {
+    "cards.total": 1,
+    "cards.executed": 1,
+    "handoffs": 0,
+    "tools.called": ["get_evidence_text", "propose_action"],
+    "tools.maxCalls": 3
+  },
+  "expectReal": {
+    "tools.maxCalls": 8,
+    "cards.total": null,
+    "cards.executed": null
+  }
+}

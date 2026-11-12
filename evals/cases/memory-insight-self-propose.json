@@ -1,0 +1,31 @@
+{
+  "id": "memory-insight-self-propose",
+  "title": "记忆：主 Agent 没提候选时，洞察 Agent 可以自己补一条",
+  "tags": ["memory"],
+  "goal": "今天和张三聊了几句近况，没什么特别要办的。",
+  "personId": "p_001",
+  "insight": true,
+  "script": [
+    { "text": "好的，今天没有需要安排的事。" },
+    {
+      "toolCall": {
+        "name": "propose_memory",
+        "arguments": {
+          "text": "截至 2026 年 9 月，张三已经戒烟三个月。",
+          "sourceIds": ["ev_003"]
+        }
+      }
+    },
+    { "text": "补充了一条记忆候选。" }
+  ],
+  "expect": {
+    "candidates.approved": 1,
+    "candidates.rejected": 0,
+    "memory.itemsDelta": 1,
+    "cards.total": 0
+  },
+  "expectReal": {
+    "candidates.approved": null,
+    "memory.itemsDelta": null
+  }
+}
