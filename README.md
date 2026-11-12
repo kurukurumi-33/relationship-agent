@@ -160,7 +160,8 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 - [x] 会话持久化（每条消息落盘）+ toolCall/toolResult 配对修复
 - [x] 证据 TTL：截图过期后只留摘要，正文不再进上下文
 - [x] 证据入库管线：哈希去重、按类型 TTL、入库即生成摘要
-- [x] 三个导入通道：JSON / ICS（时区、折行、转义、取消）/ 截图 OCR（视觉模型 + JSON 字段抽取）
+- [x] 三个导入通道：JSON / ICS（时区、折行、转义、取消、`RRULE` 展开）/ 截图 OCR（视觉模型 + JSON 字段抽取）
+- [x] 重复日程展开：`DAILY` / `WEEKLY` / `MONTHLY` / `YEARLY`，支持 `INTERVAL` / `COUNT` / `UNTIL` / `BYDAY` / `BYMONTHDAY` / `EXDATE`，窗口 90 天、单事件上限 120 个实例
 - [x] 待人工确认状态 `pending_review`：快照、检索、工具读取三层过滤，`npm run review` 接受或拒绝
 - [x] 证据访问审计：谁在哪个会话读过哪条证据
 - [x] 人工接管：护栏中断 / 设备失败时把会话交回人手里
@@ -178,7 +179,7 @@ docs/LEARNING-PLAN.md    能力缺口与学习路径
 
 - 真实设备接入（日历 / IM 通道），当前只有 mock 和 jsonl 账本
 - 截图 OCR 没有标注集，准确率只在手工跑过的几张图上确认；`confidence` 只打印，不参与判定
-- 日历 `RRULE` 不展开，只导入首个实例
+- 复杂重复规则（`BYSETPOS` / `BYMONTH` / `BYWEEKNO` 等）不展开，只导入首个实例并在正文写明原因
 - LLM 摘要压缩（现在是结构化裁剪 + 记账）
 - 记忆文档的旧版本历史（现在只存当前版本）
 - 语义评测（LLM Judge 只有接口）

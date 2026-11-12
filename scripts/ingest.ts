@@ -111,8 +111,8 @@ async function runIcs(
   }
 
   console.log(
-    `\n共 ${result.events.length} 个事件：导入 ${result.items.length}，重复 ${result.duplicates}，` +
-      `已取消 ${result.cancelled}，待人工确认 ${result.pending}`,
+    `\n共 ${result.events.length} 个事件：导入 ${result.items.length} 条（重复日程按实例展开），` +
+      `重复 ${result.duplicates}，已取消 ${result.cancelled}，待人工确认 ${result.pending}`,
   );
 }
 

@@ -13,7 +13,7 @@ import { compactMessages, type SessionSummary } from "../src/session/summary.js"
 import { buildMemorySnapshot } from "../src/agent/snapshot.js";
 import { createTools } from "../src/agent/tools.js";
 import { ingestEvidence } from "../src/ingest/evidence.js";
-import { ingestIcs } from "../src/ingest/calendar.js";
+import { ingestIcs, parseIcs } from "../src/ingest/calendar.js";
 import { ingestScreenshot } from "../src/ingest/screenshot.js";
 import { parseOcrJson, createVisionExtractor } from "../src/ingest/ocr.js";
 import { registerFauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from "@mariozechner/pi-ai";
@@ -1346,6 +1346,196 @@ async function main(): Promise<void> {
   check(
     "拒绝的证据不进入快照",
     !rejectedSnapshot.evidence.some((e) => e.evidenceId === rejectedCalendar.evidenceId),
+  );
+
+  // ---------- 21b. RRULE 展开 ----------
+  console.log("\n[21b] RRULE 展开");
+  const rruleNow = new Date("2026-11-11T00:00:00.000Z");
+  const parseOne = (lines: string[], now = rruleNow) =>
+    parseIcs(["BEGIN:VCALENDAR", ...lines, "END:VCALENDAR"].join("\r\n"), now)[0]!;
+
+  const weekly = parseOne([
+    "BEGIN:VEVENT",
+    "UID:r-weekly",
+    "SUMMARY:晨会",
+    "DTSTART:20261111T090000Z",
+    "DTEND:20261111T093000Z",
+    "RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE;COUNT=6",
+    "END:VEVENT",
+  ]);
+  check("周规则按 BYDAY 展开出 COUNT 个实例", weekly.occurrences.length === 6, weekly.occurrences.length);
+  check(
+    "BYDAY 按时间排序（本周三在前，下周一在后）",
+    weekly.occurrences[0]!.startsAt === "2026-11-11T09:00:00.000Z" &&
+      weekly.occurrences[1]!.startsAt === "2026-11-16T09:00:00.000Z",
+    weekly.occurrences.map((o) => o.startsAt),
+  );
+  check(
+    "每个实例都带上事件时长",
+    weekly.occurrences.every(
+      (o) =>
+        o.endsAt !== undefined &&
+        Date.parse(o.endsAt) - Date.parse(o.startsAt) === 30 * 60 * 1000,
+    ),
+  );
+
+  // 2026-03-08 美东进入夏令时：按墙钟推进的话 UTC 时间应该从 14:00 变成 13:00
+  const dst = parseOne(
+    [
+      "BEGIN:VEVENT",
+      "UID:r-dst",
+      "SUMMARY:跨夏令时的晨会",
+      "DTSTART;TZID=America/New_York:20260306T090000",
+      "RRULE:FREQ=DAILY;COUNT=4",
+      "END:VEVENT",
+    ],
+    new Date("2026-03-01T00:00:00.000Z"),
+  );
+  check(
+    "夏令时切换后仍按墙钟 9 点展开",
+    dst.occurrences.map((o) => o.startsAt).join(",") ===
+      [
+        "2026-03-06T14:00:00.000Z",
+        "2026-03-07T14:00:00.000Z",
+        "2026-03-08T13:00:00.000Z",
+        "2026-03-09T13:00:00.000Z",
+      ].join(","),
+    dst.occurrences.map((o) => o.startsAt),
+  );
+
+  const until = parseOne([
+    "BEGIN:VEVENT",
+    "UID:r-until",
+    "SUMMARY:连续四天",
+    "DTSTART:20261112T090000Z",
+    "RRULE:FREQ=DAILY;UNTIL=20261115T090000Z",
+    "END:VEVENT",
+  ]);
+  check(
+    "UNTIL 是闭区间",
+    until.occurrences.length === 4 &&
+      until.occurrences[3]!.startsAt === "2026-11-15T09:00:00.000Z",
+    until.occurrences.map((o) => o.startsAt),
+  );
+
+  const excluded = parseOne([
+    "BEGIN:VEVENT",
+    "UID:r-exdate",
+    "SUMMARY:跳过一次",
+    "DTSTART:20261112T090000Z",
+    "RRULE:FREQ=DAILY;COUNT=4",
+    "EXDATE:20261113T090000Z",
+    "EXDATE:20261114T090000Z",
+    "END:VEVENT",
+  ]);
+  check(
+    "多行 EXDATE 都被排除（不是只留最后一行）",
+    excluded.occurrences.length === 2,
+    excluded.occurrences.map((o) => o.startsAt),
+  );
+  check(
+    "EXDATE 不影响 COUNT 计数",
+    excluded.occurrences[1]!.startsAt === "2026-11-15T09:00:00.000Z",
+    excluded.occurrences.map((o) => o.startsAt),
+  );
+
+  const monthly = parseOne(
+    [
+      "BEGIN:VEVENT",
+      "UID:r-monthly",
+      "SUMMARY:月末复盘",
+      "DTSTART:20260131T080000Z",
+      "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=4",
+      "END:VEVENT",
+    ],
+    new Date("2026-01-01T00:00:00.000Z"),
+  );
+  check(
+    "月度规则跳过不存在的 2 月 31 日",
+    monthly.occurrences.length === 2 &&
+      monthly.occurrences[1]!.startsAt.startsWith("2026-03-31"),
+    monthly.occurrences.map((o) => o.startsAt),
+  );
+
+  const yearly = parseOne([
+    "BEGIN:VEVENT",
+    "UID:r-yearly",
+    "SUMMARY:闰日纪念",
+    "DTSTART:20240229T080000Z",
+    "RRULE:FREQ=YEARLY",
+    "END:VEVENT",
+  ]);
+  check(
+    "年度规则在非闰年不滑到 3 月 1 日",
+    yearly.occurrences.length === 1 &&
+      yearly.occurrences[0]!.startsAt.startsWith("2024-02-29"),
+    yearly.occurrences.map((o) => o.startsAt),
+  );
+
+  const unsupported = parseOne([
+    "BEGIN:VEVENT",
+    "UID:r-setpos",
+    "SUMMARY:每月第一个周一",
+    "DTSTART:20261102T100000Z",
+    "RRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1",
+    "END:VEVENT",
+  ]);
+  check(
+    "不支持的规则退化成首个实例并写明原因",
+    unsupported.occurrences.length === 1 && (unsupported.recurrenceNote ?? "").includes("BYSETPOS"),
+    unsupported.recurrenceNote,
+  );
+
+  const endless = parseOne([
+    "BEGIN:VEVENT",
+    "UID:r-endless",
+    "SUMMARY:每天提醒",
+    "DTSTART:20261111T120000Z",
+    "RRULE:FREQ=DAILY",
+    "END:VEVENT",
+  ]);
+  check(
+    "没有 COUNT/UNTIL 的规则被 90 天窗口截断",
+    endless.occurrences.length === 90 &&
+      endless.occurrences[89]!.startsAt === "2027-02-08T12:00:00.000Z",
+    endless.occurrences.length,
+  );
+
+  const recurringText = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "UID:r-ingest",
+    "SUMMARY:周报",
+    "DTSTART:20261112T100000Z",
+    "RRULE:FREQ=DAILY;COUNT=3",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+  const recurringFirst = await ingestIcs(ingestStore, recurringText, {
+    personId: "p_001",
+    sourceRef: "data/inbox/recurring.ics",
+    now: rruleNow,
+  });
+  check("重复事件按实例逐条入库", recurringFirst.items.length === 3, recurringFirst.items.length);
+  check(
+    "每个实例的 capturedAt 各不相同",
+    new Set(recurringFirst.items.map((i) => i.evidence.capturedAt)).size === 3,
+  );
+  check(
+    "正文标出这是第几个实例",
+    recurringFirst.items[1]!.evidence.content.includes("第 2/3 个实例"),
+    recurringFirst.items[1]!.evidence.content,
+  );
+  const recurringAgain = await ingestIcs(ingestStore, recurringText, {
+    personId: "p_001",
+    sourceRef: "data/inbox/recurring.ics",
+    now: rruleNow,
+  });
+  const weeklyCount = (await ingestStore.listEvidence("p_001")).filter((e) => e.title === "周报").length;
+  check(
+    "重复导入按实例命中哈希，不会翻倍",
+    recurringAgain.duplicates === 3 && weeklyCount === 3,
+    { duplicates: recurringAgain.duplicates, weeklyCount },
   );
 
   await ingestStore.close();
