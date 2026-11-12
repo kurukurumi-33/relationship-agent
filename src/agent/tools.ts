@@ -145,6 +145,22 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
         evidenceId: ev.evidenceId,
         actor: "agent",
       });
+      // 过了保留期只给摘要。TTL 的承诺是"正文不再进上下文"，只挡快照挡不住按 ID 直接读。
+      if (ctx.store.isExpired(ev)) {
+        return {
+          content: text({
+            evidenceId: ev.evidenceId,
+            kind: ev.kind,
+            capturedAt: ev.capturedAt,
+            title: ev.title,
+            sourceRef: ev.sourceRef,
+            expired: true,
+            content: ev.summary ?? "（原始材料已过期，无摘要）",
+            note: "原始材料已过保留期，正文不可读，以上是入库时生成的摘要",
+          }),
+          details: { evidenceId: ev.evidenceId, expired: true },
+        };
+      }
       return {
         content: text({
           evidenceId: ev.evidenceId,
@@ -177,13 +193,18 @@ export function createTools(ctx: ToolContext): AgentTool<any>[] {
         content: text({
           query: params.query,
           count: hits.length,
-          hits: hits.map((e) => ({
-            evidenceId: e.evidenceId,
-            kind: e.kind,
-            capturedAt: e.capturedAt,
-            title: e.title,
-            snippet: e.content.slice(0, 160),
-          })),
+          hits: hits.map((e) => {
+            const expired = ctx.store.isExpired(e);
+            return {
+              evidenceId: e.evidenceId,
+              kind: e.kind,
+              capturedAt: e.capturedAt,
+              title: e.title,
+              expired,
+              // 过期证据的正文不能从检索结果里漏出去，片段也换成摘要
+              snippet: expired ? (e.summary ?? "（原始材料已过期，无摘要）") : e.content.slice(0, 160),
+            };
+          }),
         }),
         details: { count: hits.length },
       };

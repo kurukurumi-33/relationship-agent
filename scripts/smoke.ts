@@ -1164,7 +1164,10 @@ async function main(): Promise<void> {
     onProposedMemory: () => {},
   });
   const getEvidenceTool = ingestTools.find((t) => t.name === "get_evidence_text") as unknown as {
-    execute: (id: string, params: { evidenceId: string }) => Promise<unknown>;
+    execute: (
+      id: string,
+      params: { evidenceId: string },
+    ) => Promise<{ content: { text: string }[] }>;
   };
   let pendingError = "";
   try {
@@ -1173,6 +1176,55 @@ async function main(): Promise<void> {
     pendingError = err instanceof Error ? err.message : String(err);
   }
   check("待确认证据对模型不可读", pendingError.includes("尚未通过人工确认"), pendingError);
+
+  // 过期证据：快照、检索、按 ID 读取三条路都不能把正文漏出去
+  const tail = "尾部暗号";
+  const expiredShot = await ingestEvidence(
+    ingestStore,
+    {
+      personId: "p_001",
+      kind: "screenshot",
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      title: "过期截图",
+      content: `${"很长的正文。".repeat(20)}${tail}`,
+      sourceRef: "smoke-expired.png",
+      contentHash: "sha256:smoke-expired",
+    },
+    ingestNow,
+  );
+  const expiredSnapshot = await buildMemorySnapshot(ingestStore, "p_001", ingestNow);
+  const expiredEntry = expiredSnapshot.evidence.find(
+    (e) => e.evidenceId === expiredShot.evidence.evidenceId,
+  );
+  check(
+    "过期证据在快照里只给摘要",
+    expiredEntry?.expired === true && !expiredEntry.preview.includes(tail),
+    expiredEntry?.preview,
+  );
+
+  const searchTool = ingestTools.find((t) => t.name === "search_evidence") as unknown as {
+    execute: (id: string, params: { query: string }) => Promise<{ content: { text: string }[] }>;
+  };
+  const searchPayload = JSON.parse(
+    (await searchTool.execute("c2", { query: tail })).content[0]!.text,
+  ) as { count: number; hits: { expired: boolean; snippet: string }[] };
+  check("过期证据仍能被检索到", searchPayload.count === 1, searchPayload.count);
+  check(
+    "检索片段换成摘要，不漏正文",
+    searchPayload.hits[0]?.expired === true && !searchPayload.hits[0]?.snippet.includes(tail),
+    searchPayload.hits[0],
+  );
+
+  const expiredRead = JSON.parse(
+    (await getEvidenceTool.execute("c3", { evidenceId: expiredShot.evidence.evidenceId })).content[0]!
+      .text,
+  ) as { expired: boolean; content: string; note: string };
+  check(
+    "按 ID 读过期证据只拿到摘要",
+    expiredRead.expired === true && !expiredRead.content.includes(tail),
+    expiredRead.content.slice(0, 80),
+  );
+  check("过期提示写清楚", expiredRead.note.includes("保留期"), expiredRead.note);
 
   const pendingShotPath = join(root, "data", "smoke-shot.png");
   await writeFile(pendingShotPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]));
